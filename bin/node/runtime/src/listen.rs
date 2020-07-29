@@ -273,7 +273,7 @@ decl_storage! {
 		pub RedPacketOfRoom get(fn red_packets_of_room): double_map hasher(blake2_128_concat) u64, hasher(blake2_128_concat) u128 =>
 		RedPacket<T::AccountId, BTreeSet<T::AccountId>, BalanceOf<T>, T::BlockNumber>;
 
-		pub Multisig get(fn multisig): (Vec<T::AccountId>, u16);
+		pub Multisig get(fn multisig): Option<(Vec<T::AccountId>, u16, T::AccountId)>;
 
 	}
 }
@@ -336,6 +336,8 @@ decl_error! {
 		Expire,
 		/// 不是多签id
 		NotMultisigId,
+		/// 多签id还没有设置
+		MultisigIdIsNone,
 }}
 
 
@@ -347,10 +349,14 @@ decl_module! {
 		type Error = Error<T>;
 		fn deposit_event() = default;
 
-		// 设置空投多签的人以及阀值
+
+		/// 设置用于空投的多签
 		#[weight = 10_000]
-		fn set_members_and_threshould(origin, who: Vec<T::AccountId>, threshould: u16){
-			<Multisig<T>>::put((who, threshould));
+		fn set_multisig(origin, who: Vec<T::AccountId>, threshould: u16){
+			let multisig_id = <pallet_multisig::Module<T>>::multi_account_id(&who, threshould.clone());
+			<Multisig<T>>::put((who, threshould, multisig_id));
+
+			Self::deposit_event(RawEvent::SetMultisig);
 
 		}
 
@@ -362,14 +368,11 @@ decl_module! {
 			// 空投的账号必须是listen基金会成员
 			let who = T::ListenFounders::ensure_origin(origin)?;
 
-			let (members, threshould) = <Multisig<T>>::get();
-
-			// 获取多签账号
-			let multisig_id = <pallet_multisig::Module<T>>::multi_account_id(&members, threshould);
+			/// 获取多签账号id
+			let (_, _, multisig_id) = <Multisig<T>>::get().ok_or(Error::<T>::MultisigIdIsNone)?;
 
 			// 是多签账号才给执行
 			ensure!(who.clone() == multisig_id.clone(), Error::<T>::NotMultisigId);
-
 
 			// 已经空投过的不能再操作
 			ensure!(!<AlreadyAirDropList<T>>::get().contains(&des), Error::<T>::AlreadyAirDrop);
@@ -425,7 +428,7 @@ decl_module! {
 				this_disband_start_time: T::BlockNumber::default(),
 				is_voting: false,
 				create_time: <timestamp::Module<T>>::get(),
-//				red_packets: BTreeMap<u32, RedPacket<T::AccountId, BTreeSet<T::AccountId>, T::Balance>>::default(),
+
 			};
 
 			<AllRoom<T>>::insert(group_id, group_info);
@@ -1377,7 +1380,7 @@ decl_event!(
 	 Amount = <<T as treasury::Trait>::Currency as Currency<<T as system::Trait>::AccountId>>::Balance,
 // 	 CallHash = [u8; 32],
 	 {
-
+	 SetMultisig,
 	 AirDroped(AccountId, AccountId),
 	 CreatedRoom(AccountId, u64),
 	 Invited(AccountId, AccountId),
