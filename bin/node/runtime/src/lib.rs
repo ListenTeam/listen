@@ -234,7 +234,7 @@ parameter_types! {
 impl pallet_multisig::Trait for Runtime {
 	type Event = Event;
 	type Call = Call;
-	type Currency = Balances;
+	type Currency0 = Balances;
 	type DepositBase = DepositBase;
 	type DepositFactor = DepositFactor;
 	type MaxSignatories = MaxSignatories;

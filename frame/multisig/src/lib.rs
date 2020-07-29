@@ -60,7 +60,7 @@ use sp_runtime::{DispatchError, DispatchResult, traits::Dispatchable};
 mod tests;
 mod benchmarking;
 
-type BalanceOf<T> = <<T as Trait>::Currency as Currency<<T as frame_system::Trait>::AccountId>>::Balance;
+type BalanceOf<T> = <<T as Trait>::Currency0 as Currency<<T as frame_system::Trait>::AccountId>>::Balance;
 
 /// Configuration trait.
 pub trait Trait: frame_system::Trait {
@@ -72,7 +72,7 @@ pub trait Trait: frame_system::Trait {
 		+ GetDispatchInfo + From<frame_system::Call<Self>>;
 
 	/// The currency mechanism.
-	type Currency: ReservableCurrency<Self::AccountId>;
+	type Currency0: ReservableCurrency<Self::AccountId>;
 
 	/// The base amount of currency needed to reserve for creating a multisig execution.
 	///
@@ -80,7 +80,7 @@ pub trait Trait: frame_system::Trait {
 	/// `4 + sizeof((BlockNumber, Balance, AccountId))` bytes.
 	type DepositBase: Get<BalanceOf<Self>>;
 
-	/// The amount of currency needed per unit threshold when creating a multisig execution.
+	/// The amount of Currency0 needed per unit threshold when creating a multisig execution.
 	///
 	/// This is held for adding 32 bytes more into a pre-existing storage value.
 	type DepositFactor: Get<BalanceOf<Self>>;
@@ -329,7 +329,7 @@ decl_module! {
 
 				// 如果上面不结束 那么到这里就直接执行了
 				let result = call.dispatch(frame_system::RawOrigin::Signed(id.clone()).into());
-				let _ = T::Currency::unreserve(&m.depositor, m.deposit);
+				let _ = T::Currency0::unreserve(&m.depositor, m.deposit);
 				<Multisigs<T>>::remove(&id, call_hash);
 				Self::deposit_event(RawEvent::MultisigExecuted(
 					who, timepoint, id, call_hash, result.map(|_| ()).map_err(|e| e.error)
@@ -345,7 +345,7 @@ decl_module! {
 				if threshold > 1 {
 					let deposit = T::DepositBase::get()
 						+ T::DepositFactor::get() * threshold.into();
-					T::Currency::reserve(&who, deposit)?;
+					T::Currency0::reserve(&who, deposit)?;
 					<Multisigs<T>>::insert(&id, call_hash, Multisig {
 						when: Self::timepoint(),
 						deposit,
@@ -460,7 +460,7 @@ decl_module! {
 					ensure!(maybe_timepoint.is_none(), Error::<T>::UnexpectedTimepoint);
 					let deposit = T::DepositBase::get()
 						+ T::DepositFactor::get() * threshold.into();
-					T::Currency::reserve(&who, deposit)?;
+					T::Currency0::reserve(&who, deposit)?;
 					<Multisigs<T>>::insert(&id, call_hash, Multisig {
 						when: Self::timepoint(),
 						deposit,
@@ -532,7 +532,7 @@ decl_module! {
 			ensure!(m.when == timepoint, Error::<T>::WrongTimepoint);
 			ensure!(m.depositor == who, Error::<T>::NotOwner);
 
-			let _ = T::Currency::unreserve(&m.depositor, m.deposit);
+			let _ = T::Currency0::unreserve(&m.depositor, m.deposit);
 			<Multisigs<T>>::remove(&id, call_hash);
 
 			Self::deposit_event(RawEvent::MultisigCancelled(who, timepoint, id, call_hash));

@@ -5,15 +5,18 @@ use sp_std::{result, prelude::*, collections::btree_set::BTreeSet, collections::
 use frame_support::{debug, ensure, decl_module, decl_storage, decl_error, decl_event, weights::{Weight},
 					StorageValue, StorageMap, StorageDoubleMap, IterableStorageDoubleMap, Blake2_256, traits::{ExistenceRequirement::KeepAlive, WithdrawReason, OnUnbalanced}};
 use frame_system as system;
+use pallet_multisig;
 use system::{ensure_signed, ensure_root};
 use sp_runtime::{DispatchResult, Percent, RuntimeDebug, traits::CheckedMul};
 use pallet_timestamp as timestamp;
-use node_primitives::Balance;
+use node_primitives::{Balance, AccountId};
 use crate::constants::currency::*;
+use sp_io::hashing::blake2_256;
 
 use pallet_treasury as treasury;
 use codec::{Encode, Decode};
 use vote::*;
+use hex_literal::hex;
 
 type SessionIndex = u32;
 type RoomId = u64;
@@ -204,7 +207,7 @@ pub struct PersonInfo<AllProps, Audio, Balance, RewardStatus>{
 }
 
 
-pub trait Trait: system::Trait + treasury::Trait + timestamp::Trait{
+pub trait Trait: system::Trait + treasury::Trait + timestamp::Trait + pallet_multisig::Trait{
 
 	type Event: From<Event<Self>> + Into<<Self as system::Trait>::Event>;
 
@@ -270,6 +273,8 @@ decl_storage! {
 		pub RedPacketOfRoom get(fn red_packets_of_room): double_map hasher(blake2_128_concat) u64, hasher(blake2_128_concat) u128 =>
 		RedPacket<T::AccountId, BTreeSet<T::AccountId>, BalanceOf<T>, T::BlockNumber>;
 
+		pub Multisig get(fn multisig): (Vec<T::AccountId>, u16);
+
 	}
 }
 
@@ -329,6 +334,8 @@ decl_error! {
 		CountErr,
 		/// 过期
 		Expire,
+		/// 不是多签id
+		NotMultisigId,
 }}
 
 
@@ -340,12 +347,29 @@ decl_module! {
 		type Error = Error<T>;
 		fn deposit_event() = default;
 
+		// 设置空投多签的人以及阀值
+		#[weight = 10_000]
+		fn set_members_and_threshould(origin, who: Vec<T::AccountId>, threshould: u16){
+			<Multisig<T>>::put((who, threshould));
+
+		}
+
 
 		/// 空投
 		#[weight = 10_000]
 		fn air_drop(origin, des: T::AccountId) -> DispatchResult{
+
 			// 空投的账号必须是listen基金会成员
 			let who = T::ListenFounders::ensure_origin(origin)?;
+
+			let (members, threshould) = <Multisig<T>>::get();
+
+			// 获取多签账号
+			let multisig_id = <pallet_multisig::Module<T>>::multi_account_id(&members, threshould);
+
+			// 是多签账号才给执行
+			ensure!(who.clone() == multisig_id.clone(), Error::<T>::NotMultisigId);
+
 
 			// 已经空投过的不能再操作
 			ensure!(!<AlreadyAirDropList<T>>::get().contains(&des), Error::<T>::AlreadyAirDrop);
@@ -1341,6 +1365,8 @@ impl <T: Trait> Module <T> {
 	}
 
 
+
+
 	}
 
 
@@ -1348,7 +1374,9 @@ impl <T: Trait> Module <T> {
 decl_event!(
 	pub enum Event<T> where
 	 <T as system::Trait>::AccountId,
-	 Amount = <<T as treasury::Trait>::Currency as Currency<<T as system::Trait>::AccountId>>::Balance, {
+	 Amount = <<T as treasury::Trait>::Currency as Currency<<T as system::Trait>::AccountId>>::Balance,
+// 	 CallHash = [u8; 32],
+	 {
 
 	 AirDroped(AccountId, AccountId),
 	 CreatedRoom(AccountId, u64),
