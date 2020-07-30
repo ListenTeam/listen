@@ -96,6 +96,20 @@ pub enum GroupMaxMembers{
 	NoLimit,  // 不作限制
 }
 
+impl GroupMaxMembers{
+	fn into_u32(&self) -> result::Result<u32, & 'static str>{
+		match self{
+			GroupMaxMembers::Ten => Ok(10u32),
+			GroupMaxMembers::Hundred => Ok(100u32),
+			GroupMaxMembers::FiveHundred => Ok(500u32),
+			GroupMaxMembers::TenThousand => Ok(10_0000u32),
+			GroupMaxMembers::NoLimit => Ok(u32::max_value()),
+			_ => Err("群上限人数类型不匹配"),
+		}
+
+	}
+}
+
 impl Default for GroupMaxMembers{
 	fn default() -> Self{
 		Self::Ten
@@ -206,7 +220,6 @@ pub struct PersonInfo<AllProps, Audio, Balance, RewardStatus>{
 	rooms: Vec<(RoomId, RewardStatus)>,  // 这个人加入的所有房间
 }
 
-
 pub trait Trait: system::Trait + treasury::Trait + timestamp::Trait + pallet_multisig::Trait{
 
 	type Event: From<Event<Self>> + Into<<Self as system::Trait>::Event>;
@@ -245,20 +258,12 @@ decl_storage! {
 		pub RedPacketId get(fn red_packet_id): u128 = 1;
 
 		/// 全网创建的所有群 (group_id => group_info)
-		pub AllRoom get(fn all_room): map hasher(blake2_128_concat) u64 => GroupInfo<T::AccountId, BalanceOf<T>,
-		AllProps, Audio, T::BlockNumber, GroupMaxMembers, DisbandVote<BTreeSet<T::AccountId>>, T::Moment>;
-
-		/// 邀请人的所有邀请信息 (account_id, group_id => BTreeSet<account_id> )
-		pub InViteInfoOf get(fn invite_info_of): double_map  hasher(blake2_128_concat) T::AccountId, hasher(blake2_128_concat) u64
-		=> BTreeSet<T::AccountId>;
+		pub AllRoom get(fn all_room): map hasher(blake2_128_concat) u64 => Option<GroupInfo<T::AccountId, BalanceOf<T>,
+		AllProps, Audio, T::BlockNumber, GroupMaxMembers, DisbandVote<BTreeSet<T::AccountId>>, T::Moment>>;
 
 		/// 群里的所有人以及对应的身份 (group_id, account_id => 听众身份)
 		pub ListenersOfRoom get(fn listeners_of_room): double_map hasher(blake2_128_concat) u64, hasher(blake2_128_concat) T::AccountId
 		=> Option<ListenerType>;
-
-		/// 被邀请的信息 (invitee, group_id => (inviter, payment_type, payment)
-		pub InviteeInfoOf get(fn invitee_info_of): double_map  hasher(blake2_128_concat) T::AccountId, hasher(blake2_128_concat) u64
-		=> Option<(T::AccountId, InvitePaymentType, BalanceOf<T>)>;
 
 		/// 所有人员的信息(购买道具, 购买语音, 以及加入的群)
 		pub AllListeners get(fn all_listeners): map hasher(blake2_128_concat) T::AccountId => PersonInfo<AllProps, Audio, BalanceOf<T>, RewardStatus>;
@@ -338,6 +343,14 @@ decl_error! {
 		NotMultisigId,
 		/// 多签id还没有设置
 		MultisigIdIsNone,
+		/// 邀请你自己
+		InviteYourself,
+		/// 必须有付费类型
+		MustHavePaymentType,
+		/// 非法金额（房间费用与上次相同)
+		InVailAmount,
+		/// 群人数达到上限
+		MembersNumberToMax,
 }}
 
 
@@ -433,6 +446,7 @@ decl_module! {
 
 			<AllRoom<T>>::insert(group_id, group_info);
 
+			// 这个存储其实也没必要
 			<AllListeners<T>>::mutate(who.clone(), |h| h.rooms.push((group_id, RewardStatus::default())));
 
 			<ListenersOfRoom<T>>::insert(group_id, who.clone(), ListenerType::group_manager);
@@ -444,86 +458,53 @@ decl_module! {
 		}
 
 
-		/// 邀请人进群
+		/// 群主修改进群的费用
 		#[weight = 10_000]
-		fn invite(origin,  group_id: u64, listener: T::AccountId, payment_type: InvitePaymentType) -> DispatchResult{
+		fn modify_join_cost(origin, group_id: u64, join_cost: BalanceOf<T>) -> DispatchResult{
 			let who = ensure_signed(origin)?;
-
-			// 不能自己邀请自己
-			ensure!(&who != &listener, Error::<T>::IsYourSelf);
-			// 判断群是否已经创建 不存在则退出
-			ensure!(<AllRoom<T>>::contains_key(group_id), Error::<T>::RoomNotExists);
-
-			// 如果已经在群里 则不能邀请(所以你不能邀请群主)
-			ensure!(!<ListenersOfRoom<T>>::contains_key(group_id, listener.clone()), Error::<T>::InRoom);
-
-			// 如果已经邀请不能再次邀请
-			let mut invite_info = <InViteInfoOf<T>>::get(who.clone(), group_id);
-			let mut invitee_info = <InviteeInfoOf<T>>::get(listener.clone(), group_id);
-			ensure!(!invite_info.contains(&listener) && invitee_info.is_none(), Error::<T>::AlreadyInvited);
-
-			let join_cost = <AllRoom<T>>::get(group_id).join_cost;
-
-			//如果付费类型是邀请人付费  邀请人要抵押金额（如果该群是付费进群）
-			match payment_type.clone() {
-
-				InvitePaymentType::inviter => {
-
-					if join_cost != <BalanceOf<T>>::from(0u32){
-						T::Currency::reserve(&who, join_cost)
-						.map_err(|_| Error::<T>::BondTooLow)?;
-					}
-				},
-
-				InvitePaymentType::invitee => {
-					// 啥也不干
-				},
-			}
-
-			invite_info.insert(listener.clone());
-			<InViteInfoOf<T>>::insert(who.clone(), group_id, invite_info);
-
-			<InviteeInfoOf<T>>::insert(listener.clone(), group_id,(who.clone(), payment_type.clone(), join_cost));
-
-			Self::deposit_event(RawEvent::Invited(who, listener));
+			let room_info = <AllRoom<T>>::get(group_id);
+			// 群存在
+			ensure!(room_info.is_some(), Error::<T>::RoomNotExists);
+			let mut room_info = room_info.unwrap();
+			// 是群主
+			ensure!(who.clone() == room_info.group_manager.clone(), Error::<T>::NotManager);
+			// 金额不能与原先的相同
+			ensure!(room_info.join_cost.clone() != join_cost.clone(),  Error::<T>::InVailAmount);
+			room_info.join_cost = join_cost.clone();
+			<AllRoom<T>>::insert(group_id, room_info);
+			Self::deposit_event(RawEvent::JoinCostChanged(group_id, join_cost));
 			Ok(())
 		}
 
 
 		/// 进群
 		#[weight = 10_000]
-		fn into_room(origin, group_id: u64) -> DispatchResult{
+		fn into_room(origin, group_id: u64, invite: T::AccountId, inviter: Option<T::AccountId>, payment_type: Option<InvitePaymentType>) -> DispatchResult{
 			let who = ensure_signed(origin)?;
-			// 判断群是否已经创建 不存在则退出
-			ensure!(<AllRoom<T>>::contains_key(group_id), Error::<T>::RoomNotExists);
-			Self::join_do(who.clone(), group_id)?;
-			Self::deposit_event(RawEvent::IntoRoom(who, group_id));
-			Ok(())
-		}
-
-
-		/// 拒绝邀请
-		#[weight = 10_000]
-		fn reject_invite(origin, group_id: u64) -> DispatchResult{
-			let who = ensure_signed(origin)?;
-			// 被邀请进的群存在
-			ensure!(<AllRoom<T>>::contains_key(group_id), Error::<T>::RoomNotExists);
-			ensure!(<InviteeInfoOf<T>>::contains_key(who.clone(), group_id), Error::<T>::NotInvited);
-
-			// 如果是抵押邀请 那么归还邀请人抵押
-			let info = <InviteeInfoOf<T>>::take(who.clone(), group_id).unwrap();
-
-			if info.1 == InvitePaymentType::inviter{
-				T::Currency::unreserve(&info.0, info.2.clone());
+			// 如果有邀请人 邀请人不能是自己， 并且要求有付费类型
+			if inviter.is_some(){
+				ensure!(inviter.clone().unwrap() != invite, Error::<T>::InviteYourself);
+				ensure!(payment_type.is_some(), Error::<T>::MustHavePaymentType);
 			}
 
-			// 删除相关记录
-			let mut invite_info = <InViteInfoOf<T>>::get(info.0.clone(), group_id);
-			invite_info.remove(&who);
-			<InViteInfoOf<T>>::insert(info.0.clone(), group_id, invite_info);
 
-			Self::deposit_event(RawEvent::RejectedInvite(who, group_id));
 
+			let room_info = <AllRoom<T>>::get(group_id);
+
+			// 判断群是否已经创建 不存在则退出
+			ensure!(room_info.is_some(), Error::<T>::RoomNotExists);
+
+			// 如果进群人数已经达到上限， 不能进群
+			let room_info = room_info.unwrap();
+
+			ensure!(room_info.max_members.clone().into_u32()? >= room_info.now_members_number.clone(), Error::<T>::MembersNumberToMax);
+
+			// 如果自己已经在群里 不需要重新进
+			ensure!(!<ListenersOfRoom<T>>::contains_key(group_id, who.clone()), Error::<T>::InRoom);
+
+			Self::join_do(who.clone(), group_id, inviter.clone(), payment_type.clone())?;
+
+			Self::deposit_event(RawEvent::IntoRoom(who, group_id));
 			Ok(())
 		}
 
@@ -560,7 +541,7 @@ decl_module! {
 			T::ProposalRejection::on_unbalanced(T::Currency::withdraw(&who, cost.clone(), WithdrawReason::Transfer.into(), KeepAlive)?);
 
 			// 修改群信息
-			let mut room = <AllRoom<T>>::get(group_id);
+			let mut room = <AllRoom<T>>::get(group_id).unwrap();
 			room.props.picture = room.props.picture.checked_add(props.picture).ok_or(Error::<T>::Overflow)?;
 			room.props.text = room.props.text.checked_add(props.text).ok_or(Error::<T>::Overflow)?;
 			room.props.video = room.props.video.checked_add(props.video).ok_or(Error::<T>::Overflow)?;
@@ -617,7 +598,7 @@ decl_module! {
 			T::ProposalRejection::on_unbalanced(T::Currency::withdraw(&who, cost.clone(), WithdrawReason::Transfer.into(), KeepAlive)?);
 
 			// 修改群信息
-			let mut room = <AllRoom<T>>::get(group_id);
+			let mut room = <AllRoom<T>>::get(group_id).unwrap();
 			room.audio.ten_seconds = room.audio.ten_seconds.checked_add(audio.ten_seconds).ok_or(Error::<T>::Overflow)?;
 			room.audio.thirty_seconds = room.audio.thirty_seconds.checked_add(audio.thirty_seconds).ok_or(Error::<T>::Overflow)?;
 			room.audio.minutes = room.audio.minutes.checked_add(audio.minutes).ok_or(Error::<T>::Overflow)?;
@@ -642,38 +623,6 @@ decl_module! {
 		}
 
 
-		/// 群主修改听众权限
-		#[weight = 10_000]
-		fn change_permission(origin, group_id: u64, who: T::AccountId, permission: ListenerType) -> DispatchResult{
-			let manager = ensure_signed(origin)?;
-
-			// 不能是群主权限
-			ensure!(permission != ListenerType::group_manager, Error::<T>::PermissionErr);
-
-			// 房间存在
-			ensure!(<AllRoom<T>>::contains_key(group_id), Error::<T>::RoomNotExists);
-			// 是群主
-			if let Some(info) = <ListenersOfRoom<T>>::get(group_id, manager.clone()) {
-				if permission != ListenerType::group_manager{
-					return Err(Error::<T>::NotManager)?;
-				}
-			}
-			else{
-				return Err(Error::<T>::RoomNotExists)?;
-			}
-
-			// 这个人在群里
-			ensure!(<ListenersOfRoom<T>>::contains_key(group_id, who.clone()), Error::<T>::NotInRoom);
-
-			// 更改权限
-			<ListenersOfRoom<T>>::insert(group_id, who.clone(), permission);
-
-			Self::deposit_event(RawEvent::ChangedPermission(who.clone(), group_id));
-			Ok(())
-
-		}
-
-
 		/// 群主踢人
 		#[weight = 10_000]
 		fn kick_someone(origin, group_id: u64, who: T::AccountId) -> DispatchResult {
@@ -681,7 +630,7 @@ decl_module! {
 			// 这个群存在
 			ensure!(<AllRoom<T>>::contains_key(group_id), Error::<T>::RoomNotExists);
 
-			let mut room = <AllRoom<T>>::get(group_id);
+			let mut room = <AllRoom<T>>::get(group_id).unwrap();
 			// 是群主
 			ensure!(room.group_manager == manager.clone(), Error::<T>::NotManager);
 			// 这个人在群里
@@ -755,7 +704,7 @@ decl_module! {
 			// 举报人必须是群里的成员
 			ensure!(<ListenersOfRoom<T>>::contains_key(group_id, who.clone()), Error::<T>::NotInRoom);
 
-			let mut room = <AllRoom<T>>::get(group_id);
+			let mut room = <AllRoom<T>>::get(group_id).unwrap();
 
 
 			// 该群还未处于投票状态
@@ -789,7 +738,7 @@ decl_module! {
 			// 举报人必须是群里的成员
 			ensure!(<ListenersOfRoom<T>>::contains_key(group_id, who.clone()), Error::<T>::NotInRoom);
 
-			let mut room = <AllRoom<T>>::get(group_id);
+			let mut room = <AllRoom<T>>::get(group_id).unwrap();
 
 			// 正在投票
 			ensure!(room.is_voting, Error::<T>::NotVoting);
@@ -1118,56 +1067,53 @@ impl <T: Trait> Module <T> {
 
 
 	// 加入群聊的操作
-	fn join_do(you: T::AccountId, group_id: u64) -> DispatchResult{
+	fn join_do(you: T::AccountId, group_id: u64, inviter: Option<T::AccountId>, payment_type: Option<InvitePaymentType>) -> DispatchResult{
 
-		let mut join_cost = <BalanceOf<T>>::from(0u32);
-		// 获取被邀请信息
-		let invitee_info = <InviteeInfoOf<T>>::get(you.clone(), group_id);
-		match invitee_info {
-			// 如果是自己被邀请进来的
-			Some(x) => {
+		let room_info = <AllRoom<T>>::get(group_id).unwrap();
 
-				let inviter = x.0;
-				let payment_type = x.1;
-				// 自己被邀请 用被邀请时候的金额
-				join_cost = x.2;
+		// 获取进群费用
+		let join_cost = room_info.join_cost.clone();
 
-				// 如果需要付费
-				if join_cost > <BalanceOf<T>>::from(0u32){
-					// 如果是邀请者自己出钱
-					if payment_type == InvitePaymentType::inviter{
-						// 扣除邀请者的钱(惩罚保留的)
-						T::ProposalRejection::on_unbalanced(T::Currency::slash_reserved(&inviter, join_cost).0);
+		if inviter.is_some() {
 
-						// 以铸币方式给其他账户转账
-						Self::pay_for(group_id, join_cost);
-					}
-					// 如果是进群的人自己交费用
-					else{
-						T::ProposalRejection::on_unbalanced(T::Currency::withdraw(&you, join_cost.clone(), WithdrawReason::Transfer.into(), KeepAlive)?);
-						Self::pay_for(group_id, join_cost);
+			let inviter = inviter.unwrap();
+			let payment_type = payment_type.unwrap();
 
-					}
+			// 如果需要付费
+			if join_cost > <BalanceOf<T>>::from(0u32){
+				// 如果是邀请者自己出钱
+				if payment_type == InvitePaymentType::inviter{
+					// 扣除邀请者的钱(惩罚保留的)
+					T::ProposalRejection::on_unbalanced(T::Currency::withdraw(&inviter, join_cost.clone(), WithdrawReason::Transfer.into(), KeepAlive)?);
 
+					// 以铸币方式给其他账户转账
+					Self::pay_for(group_id, join_cost);
 				}
-
-				Self::remove_and_add_info(you.clone(), group_id, true)
-
-			},
-			// 如果自己不是被邀请进来的
-			None => {
-				// 获取进群费用
-				join_cost = <AllRoom<T>>::get(group_id).join_cost;
-				// 如果需要支付群费用
-				if join_cost > <BalanceOf<T>>::from(0u32){
+				// 如果是进群的人自己交费用
+				else{
 					T::ProposalRejection::on_unbalanced(T::Currency::withdraw(&you, join_cost.clone(), WithdrawReason::Transfer.into(), KeepAlive)?);
 					Self::pay_for(group_id, join_cost);
 
 				}
-				Self::remove_and_add_info(you.clone(), group_id, false)
 
-			},
+			}
+
+			Self::remove_and_add_info(you.clone(), group_id, true)
+
 		}
+
+		// 如果自己不是被邀请进来的
+		else {
+			// 如果需要支付群费用
+			if join_cost > <BalanceOf<T>>::from(0u32){
+				T::ProposalRejection::on_unbalanced(T::Currency::withdraw(&you, join_cost.clone(), WithdrawReason::Transfer.into(), KeepAlive)?);
+				Self::pay_for(group_id, join_cost);
+
+			}
+			Self::remove_and_add_info(you.clone(), group_id, false)
+
+			}
+
 		Ok(())
 	}
 
@@ -1178,7 +1124,7 @@ impl <T: Trait> Module <T> {
 		let payment_manager_later = Percent::from_percent(5) * join_cost;
 		let payment_room_later = Percent::from_percent(50) * join_cost;
 		let payment_treasury = Percent::from_percent(40) * join_cost;
-		let mut room_info = <AllRoom<T>>::get(group_id);
+		let mut room_info = <AllRoom<T>>::get(group_id).unwrap();
 
 		// 这些数据u128远远足够 不用特殊处理 要是panic  可以回家卖红薯
 		room_info.total_balances += payment_room_later;
@@ -1202,24 +1148,8 @@ impl <T: Trait> Module <T> {
 
 	// 进群的最后一步 添加与删除数据
 	fn remove_and_add_info(yourself: T::AccountId, group_id: u64, is_invited: bool){
+
 		let mut listener_type = ListenerType::default();
-		if is_invited{
-			if let Some(invitee_info) = <InviteeInfoOf<T>>::get(yourself.clone(), group_id){
-			let inviter =  invitee_info.0;
-			let mut invite_info = <InViteInfoOf<T>>::get(inviter.clone(), group_id);
-			invite_info.take(&yourself);
-			<InViteInfoOf<T>>::insert(inviter.clone(), group_id, invite_info);
-			// 如果邀请人是群主 那么是嘉宾
-			if let Some(info) = <ListenersOfRoom<T>>::get(group_id, inviter.clone()){
-				if info == ListenerType::group_manager{
-					listener_type = ListenerType::honored_guest;
-				}
-			}
-		}
-
-		}
-
-		<InviteeInfoOf<T>>::remove(yourself.clone(), group_id);
 
 		// 添加信息
 		<ListenersOfRoom<T>>::insert(group_id, yourself.clone(), listener_type);
@@ -1395,6 +1325,7 @@ decl_event!(
 	 Payout(AccountId, Amount),
 	 SendRedPocket(u64, u128, Amount),
 	 GetRedPocket(u64, u128, Amount),
+	 JoinCostChanged(u64, Amount),
 
 	}
 );
