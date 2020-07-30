@@ -11,10 +11,11 @@
 	* 参数： 
 		- des: 空投的目标地址
 	* 逻辑:
-		- 需要listen基金会权限
+		- 需要多签权限
 		- 一个账户只能被空投一次
 		- 国库给空投账户转账0.99个LT
 		- 空投的账户不能被删除(不会有灰尘处理)
+	>>> 要空投必须先创建一个多签地址， 然后用那个多签地址进行空投
 ***
 2. 创建房间
 	* 代码： `fn create_room(origin, max_members: GroupMaxMembers, group_type: Vec<u8>, join_cost: BalanceOf<T>)`
@@ -27,40 +28,41 @@
 		- 根据房间人数上限收取创建费用(账上余额不够，不给创建)， 并且费用直接转到国库
 	>>> 创建费用收取： 10人群，1LT； 100人群， 10LT； 500人群， 30LT； 10000人群， 200LT； 不限制， 1000LT
 ***
-3. 邀请别人进群
-	* 代码： `fn invite(origin,  group_id: u64, listener: T::AccountId, payment_type: InvitePaymentType)`
+3. 创建一个多签的账号(用于空投)
+	* 代码： `fn set_multisig(origin, who: Vec<T::AccountId>, threshould: u16)`
 	* 参数： 
-		- group_id： 房间id
-		- listener： 被邀请人
-		- payment_type： 付费类型(邀请人付费或是被邀请人付费)
+		- who： 参与多签的所有人员id
+		- threshould： 阀值(有多少个人签名就可以执行空投操作)
 	* 逻辑：
-		- 任何人均可以邀请别人进群， 但是不能自己邀请自己
-		- 邀请进的群必须存在，并且没有被解散
-		- 不能重复邀请
-		- 如果是邀请人付费， 需要抵押进群费用相当的金额（账上余额不够抵押不能邀请)
-	>>> 不管是邀请人付费还是被邀请人付费， 均是进群时才会真的扣除费用
+		- root权限(或是公投)
+	>>> 一定要先有多签账号，才能进行空投
+
 ***
 4. 进群
-	* 代码： `fn into_room(origin, group_id: u64)`
+	* 代码： `fn into_room(origin, group_id: u64, invite: T::AccountId, inviter: Option<T::AccountId>, payment_type: Option<InvitePaymentType>)`
 	* 参数： 
 		- group_id： 房间号
+		- invite: 被邀请人
+		- inviter: 邀请人(可以为空)
+		- payment_type: 付费类型(邀请人付费或是被邀请人付费)(可以为空值)
+		>>> 说明： 如果有邀请人，那么邀请人不能是自己，并且付费类型不能为空
 	* 逻辑：
 		- 签名
 		- 房间存在
-		- 如果自己是被邀请进群的： 邀请人付费就惩罚保留金额；被邀请人付费就从账上余额中扣除费用(余额不够不给进群)
-		- 如果是被邀请： 邀请人是群主，则被邀请人身份是贵宾；如果不是群主， 则是普通听众
-		- 如果自己不是被邀请进群， 需要自己支付进群费用
+		- 如果群总人数已经达到上限，不能进群
+		- 如果已经在群里，不能再次进入
+		- 从付费人的账号余额里，扣除进群费用，费用不够，不给进群
+
 	>>> 进群费用明细： 5%直接转到群主账上； 5%先统计在群里， 解散后给群主； 50%直接转给国库； 40%统计到群里，作为公共费用，群解散后均分
 ***
-5. 拒绝邀请
-	* 代码：`fn reject_invite(origin, group_id: u64)`
+5. 群主修改进群费用
+	* 代码：`fn modify_join_cost(origin, group_id: u64, join_cost: BalanceOf<T>)`
 	* 参数： 
 		- group_id： 房间id
+		- join_cost: 费用
 	* 逻辑：
-		- 签名
-		- 房间存在
-		- 自己被邀请
-		- 如果邀请人邀请时设置进群费用是邀请人自己出， 那么解除邀请时的抵押
+		- 房间存在，并且是群主
+		- 金额不能跟之前的一样
 ***
 6. 在群里购买道具
 	* 代码： `fn buy_props_in_room(origin, group_id: u64, props: AllProps)`
@@ -89,20 +91,8 @@
 	>>> 语音类型有： 10s, 30s, 60s, 具体收费情况看白皮书
 	
 ***
-8. 群主修改听众权限
-	* 代码: `fn change_permission(origin, group_id: u64, who: T::AccountId, permission: ListenerType)`
-	* 参数： 
-		- group_id： 房间id
-		- who： 即将被修改权限的听众
-		- permission： 权限(群主、 普通听众、 贵宾)
-	* 逻辑：
-		- 必须是群主才能更改其他人权限
-		- 房间存在，并且被修改的那个人在群里
-		- 群主不能修改自己的权限
-		- 不能修改其他人权限为群主权限
-***
 
-9. 群主踢人
+8. 群主踢人
 	* 代码： `fn kick_someone(origin, group_id: u64, who: T::AccountId)`
 	* 参数： 
 		- group_id： 房间id
@@ -112,9 +102,9 @@
 		- 必须是群主才能踢人
 		- 被踢的人在群里
 		- 群解散后， 这个被踢的人不被奖励（这里逻辑要重新审核）
-		- 群主不能随意踢人： 一次仅可以踢一个人； 踢人有时间间隔要求， 具体看白皮书
+		- 群主不能随意踢人： 一次仅可以踢一个人； 踢人有时间间隔要求(在可以踢人的时间段才能踢)， 具体看白皮书
 ***
-10. 要求解散群
+9. 要求解散群
 	* 代码： `fn ask_for_disband_room(origin, group_id: u64)`
 	* 参数： 
 		- 房间id： group_id
@@ -126,7 +116,7 @@
 		- 需要花费进群费用的1/10， 并且直接转到国库
 		- 议案3天过期
 ***
-11. 给解散群的提案进行投票
+10. 给解散群的提案进行投票
 	* 代码： `fn vote(origin, group_id: u64, vote: VoteType)`
 	* 参数： 
 		- 房间id： group_id
@@ -138,16 +128,16 @@
 		- 如果提按结束并且通过： 把所有剩余的红包余额归还发红包的人； 把属于群主个人独享的部分奖励给群主（剩下的公共部分需要个人自己认领)
 		- 如果提案结束未通过， 把投票记录删除
 ***
-12. 自己领取奖励
+11. 自己领取奖励(一键领取)
 	* 代码: `fn pay_out(origin)`
 	* 参数无
 	* 逻辑:
 		- 之前有加入的房间
 		- 有房间奖励处于未领取状态
-		- 奖励只能领取最多20个session的， 其余算过期处理
+		- 奖励只能领取最多20个session的， 其余算过期处理(过期的数据被清除)
 	>>> 注意： 这个操作是领取本人所有能够领取的奖励
 ***
-13. 在群里发红包
+12. 在群里发红包
 	* 代码： `pub fn send_redpacket_in_room(origin, group_id: u64, lucky_man_number: u32, amount: BalanceOf<T>)`
 	* 参数： 
 		- group_id： 房间id
@@ -176,3 +166,152 @@
 		- 如果领取红包的人数已经达到上限， 剩余金额归还给发红包的人
 		- 顺便处理群里所有过期红包
 ***
+## 主要数据结构
+```bazaar
+/// 所有道具的统计
+#[derive(PartialEq, Encode, Decode, Default, RuntimeDebug, Clone)]
+pub struct AllProps{
+	picture: u32, // 图片有多少
+	text: u32, // 文字有多少
+	video: u32, // 视频有多少
+}
+
+
+```
+***
+```bazaar
+/// 语音时长类型的统计
+#[derive(PartialEq, Encode, Decode, Default, RuntimeDebug, Clone)]
+pub struct Audio{
+	ten_seconds: u32,  // 10秒有多少
+	thirty_seconds: u32,  // 30秒有多少
+	minutes: u32,  // 一分钟有多少
+}
+
+```
+***
+```bazaar
+/// 群的奖励信息
+#[derive(PartialEq, Encode, Decode, Default, RuntimeDebug, Clone)]
+pub struct RoomRewardInfo<Balance>{
+	total_person: u32,  // 一共奖励的人数
+	already_get_count: u32, // 已经奖励的人数
+	total_reward: Balance,  // 总奖励
+	already_get_reward: Balance, // 已经领取的奖励
+	per_man_reward: Balance,  // 平均每个人的奖励
+
+}
+```
+***
+```bazaar
+/// 解散投票
+#[derive(PartialEq, Encode, Decode, Default, RuntimeDebug, Clone)]
+pub struct DisbandVote<BTreeSet>{
+	approve_man: BTreeSet, // 同意解散的所有人
+	reject_man: BTreeSet, // 拒绝解散的所有人
+}
+```
+***
+```bazaar
+/// 红包
+#[derive(PartialEq, Encode, Decode, Default, RuntimeDebug, Clone)]
+pub struct RedPacket<AccountId, BTreeSet, Balance, BlockNumber>{
+
+	id: u128, // 红包id
+	boss: AccountId,  // 发红包的人
+	total: Balance,	// 红包总金额
+	lucky_man_number: u32, // 红包奖励的人数
+	already_get_man: BTreeSet, // 已经领取红包的人
+	min_amount_of_per_man: Balance, // 每个人领取的最小红包金额
+	already_get_amount: Balance, // 已经总共领取的金额数
+	end_time: BlockNumber, // 红包结束的时间
+
+}
+```
+***
+```bazaar
+/// 群的类型
+#[derive(PartialEq, Encode, Decode, RuntimeDebug, Clone)]
+pub enum GroupMaxMembers{
+	Ten,  // 10人群
+	Hundred, // 100人群
+	FiveHundred, // 500人群
+	TenThousand, // 1000010人群
+	NoLimit,  // 不作限制
+}
+
+```
+***
+```bazaar
+/// 投票类型
+#[derive(PartialEq, Encode, Decode, RuntimeDebug, Clone)]
+pub enum VoteType{
+	Approve, // 投同意
+	Reject,  // 投反对
+}
+```
+***
+```bazaar
+// 个人在某房间的领取奖励的状态
+#[derive(PartialEq, Encode, Decode, RuntimeDebug, Clone)]
+pub enum RewardStatus{
+	Get, // 已经领取
+	NotGet,  // 还没有领取
+	Expire, // 过期
+
+}
+```
+***
+```bazaar
+/// 邀请第三人进群的缴费方式
+#[derive(PartialEq, Encode, Decode, RuntimeDebug, Clone)]
+pub enum InvitePaymentType{
+	inviter,  // 邀请人交费
+	invitee,  // 被邀请人自己交
+}
+```
+***
+```bazaar
+/// 群的信息
+#[derive(PartialEq, Encode, Decode, Default, RuntimeDebug, Clone)]
+pub struct GroupInfo<AccountId, Balance, AllProps, Audio, BlockNumber, GroupMaxMembers, DisbandVote, Moment>{
+	group_id: u64,  // 群的id直接用自增的u64类型
+
+	create_payment: Balance,  // 创建群时支付的费用
+
+	group_manager: AccountId,  // 群主
+	max_members: GroupMaxMembers, // 最大群人数
+
+	group_type: Vec<u8>, // 群的类型（玩家自定义字符串）
+	join_cost: Balance,  // 这个是累加的的还是啥？？？
+
+	props: AllProps,  // 本群语音购买统计
+	audio: Audio, // 本群道具购买统计
+
+	total_balances: Balance, // 群总币余额
+	group_manager_balances: Balance, // 群主币余额
+
+	now_members_number: u32, // 目前群人数
+
+	last_kick_hight: BlockNumber,  // 群主上次踢人的高度
+	last_disband_end_hight: BlockNumber,  // 上次解散群提议结束时的高度
+
+	disband_vote: DisbandVote, // 投票信息
+	this_disband_start_time: BlockNumber, // 解散议案开始投票的时间
+
+	is_voting: bool,  // 是否出于投票状态
+	create_time: Moment,
+
+}
+
+```
+***
+```bazaar
+#[derive(PartialEq, Encode, Decode, Default, RuntimeDebug, Clone)]
+pub struct PersonInfo<AllProps, Audio, Balance, RewardStatus>{
+	props: AllProps, // 这个人的道具购买统计
+	audio: Audio, // 这个人的语音购买统计
+	cost: Balance, // 个人购买道具与语音的总费用
+	rooms: Vec<(RoomId, RewardStatus)>,  // 这个人加入的所有房间
+}
+```
