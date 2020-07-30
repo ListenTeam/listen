@@ -155,6 +155,9 @@ mod tests_local;
 mod tests_composite;
 mod benchmarking;
 
+use pallet_nicks as nicks;
+use nicks::AccountIdOf;
+
 use sp_std::prelude::*;
 use sp_std::{cmp, result, mem, fmt::Debug, ops::BitOr, convert::Infallible};
 use codec::{Codec, Encode, Decode};
@@ -178,7 +181,7 @@ use frame_system::{self as system, ensure_signed, ensure_root};
 
 pub use self::imbalances::{PositiveImbalance, NegativeImbalance};
 
-pub trait Subtrait<I: Instance = DefaultInstance>: frame_system::Trait {
+pub trait Subtrait<I: Instance = DefaultInstance>: frame_system::Trait + nicks::Trait{
 	/// The balance of an account.
 	type Balance: Parameter + Member + AtLeast32Bit + Codec + Default + Copy +
 		MaybeSerializeDeserialize + Debug;
@@ -190,7 +193,7 @@ pub trait Subtrait<I: Instance = DefaultInstance>: frame_system::Trait {
 	type AccountStore: StoredMap<Self::AccountId, AccountData<Self::Balance>>;
 }
 
-pub trait Trait<I: Instance = DefaultInstance>: frame_system::Trait {
+pub trait Trait<I: Instance = DefaultInstance>: frame_system::Trait + nicks::Trait{
 	/// The balance of an account.
 	type Balance: Parameter + Member + AtLeast32Bit + Codec + Default + Copy +
 		MaybeSerializeDeserialize + Debug;
@@ -251,6 +254,8 @@ decl_error! {
 		ExistingVestingSchedule,
 		/// Beneficiary account must pre-exist
 		DeadAccount,
+		/// 不存在的人名
+		NotExistsName,
 	}
 }
 
@@ -441,6 +446,23 @@ decl_module! {
 			<Self as Currency<_>>::transfer(&transactor, &dest, value, ExistenceRequirement::AllowDeath)?;
 		}
 
+
+		#[weight = T::DbWeight::get().reads_writes(1, 1) + 70_000_000]
+		pub fn transfer_by_name(
+			origin,
+			dest: Vec<u8>,
+			#[compact] value: T::Balance
+		) {
+			let transactor = ensure_signed(origin)?;
+
+			ensure!(<AccountIdOf<T>>::contains_key(dest.clone()), Error::<T, I>::NotExistsName);
+
+			let dest = <AccountIdOf<T>>::get(dest.clone());
+
+			<Self as Currency<_>>::transfer(&transactor, &dest, value, ExistenceRequirement::AllowDeath)?;
+		}
+
+
 		/// Set the balances of a given account.
 		///
 		/// This will alter `FreeBalance` and `ReservedBalance` in storage. it will
@@ -537,6 +559,20 @@ decl_module! {
 			let dest = T::Lookup::lookup(dest)?;
 			<Self as Currency<_>>::transfer(&transactor, &dest, value, KeepAlive)?;
 		}
+
+
+		#[weight = T::DbWeight::get().reads_writes(1, 1) + 50_000_000]
+		pub fn transfer_keep_alive_by_name(
+			origin,
+			dest: Vec<u8>,
+			#[compact] value: T::Balance
+		) {
+			let transactor = ensure_signed(origin)?;
+			ensure!(<AccountIdOf<T>>::contains_key(dest.clone()), Error::<T, I>::NotExistsName);
+			let dest = <AccountIdOf<T>>::get(dest.clone());
+			<Self as Currency<_>>::transfer(&transactor, &dest, value, KeepAlive)?;
+		}
+
 	}
 }
 
@@ -877,6 +913,16 @@ impl<T: Subtrait<I>, I: Instance> Trait<I> for ElevatedTrait<T, I> {
 	type DustRemoval = ();
 	type ExistentialDeposit = T::ExistentialDeposit;
 	type AccountStore = T::AccountStore;
+}
+
+impl<T: Subtrait<I>, I: Instance> nicks::Trait for ElevatedTrait<T, I> {
+	type Event = ();
+	type Currency_n = T::Currency_n;
+	type ReservationFee = T::ReservationFee;
+	type Slashed = T::Slashed;
+	type ForceOrigin = T::ForceOrigin;
+	type MinLength = T::MinLength;
+	type MaxLength = T::MaxLength;
 }
 
 impl<T: Trait<I>, I: Instance> Currency<T::AccountId> for Module<T, I> where

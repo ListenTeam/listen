@@ -1,19 +1,18 @@
+// Copyright 2019-2020 Parity Technologies (UK) Ltd.
 // This file is part of Substrate.
 
-// Copyright (C) 2019-2020 Parity Technologies (UK) Ltd.
-// SPDX-License-Identifier: Apache-2.0
+// Substrate is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
 
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-// 	http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
+// Substrate is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU General Public License for more details.
+
+// You should have received a copy of the GNU General Public License
+// along with Substrate.  If not, see <http://www.gnu.org/licenses/>.
 
 //! # Nicks Module
 //!
@@ -45,22 +44,23 @@ use sp_runtime::{
 };
 use frame_support::{
 	decl_module, decl_event, decl_storage, ensure, decl_error,
-	traits::{Currency, EnsureOrigin, ReservableCurrency, OnUnbalanced, Get},
+	traits::{Currency, ReservableCurrency, OnUnbalanced, Get, EnsureOrigin},
+	weights::Weight,
 };
-use frame_system::{self as system, ensure_signed};
+use frame_system::{self as system, ensure_signed, ensure_root};
 
-type BalanceOf<T> = <<T as Trait>::Currency as Currency<<T as frame_system::Trait>::AccountId>>::Balance;
-type NegativeImbalanceOf<T> = <<T as Trait>::Currency as Currency<<T as frame_system::Trait>::AccountId>>::NegativeImbalance;
+type BalanceOf<T> = <<T as Trait>::Currency_n as Currency<<T as frame_system::Trait>::AccountId>>::Balance;
+type NegativeImbalanceOf<T> = <<T as Trait>::Currency_n as Currency<<T as frame_system::Trait>::AccountId>>::NegativeImbalance;
 
-pub trait Trait: frame_system::Trait {
+pub trait Trait: system::Trait {
 	/// The overarching event type.
-	type Event: From<Event<Self>> + Into<<Self as frame_system::Trait>::Event>;
+	type Event: From<Event<Self>> + Into<<Self as system::Trait>::Event>;
 
 	/// The currency trait.
-	type Currency: ReservableCurrency<Self::AccountId>;
+	type Currency_n: ReservableCurrency<Self::AccountId>;
 
 	/// Reservation fee.
-	type ReservationFee: Get<BalanceOf<Self>>;
+	type ReservationFee: Get<BalanceOf<Self>>;  // 1 token
 
 	/// What to do with slashed funds.
 	type Slashed: OnUnbalanced<NegativeImbalanceOf<Self>>;
@@ -76,14 +76,42 @@ pub trait Trait: frame_system::Trait {
 }
 
 decl_storage! {
-	trait Store for Module<T: Trait> as Nicks {
+	trait Store for Module<T: Trait> as Sudo {
 		/// The lookup table for names.
-		NameOf: map hasher(twox_64_concat) T::AccountId => Option<(Vec<u8>, BalanceOf<T>)>;
+		NameOf: map hasher(blake2_128_concat) T::AccountId => Option<(Vec<u8>, BalanceOf<T>)>;
+
+		// 建立名字 => accountid 映射, 目的是为了能够从名字找到对应的accountid
+		pub AccountIdOf: map hasher(blake2_128_concat) Vec<u8> => T::AccountId;
 	}
 }
 
+decl_error! {
+	/// Error for the elections module.
+	pub enum Error for Module<T: Trait> {
+		/// 名字太短
+		NameTooShort,
+
+		/// 名字太长
+		NameTooLong,
+
+		/// 已经存在的名字
+		ExistsName,
+
+		/// 不是已经存在的名字
+		NotExistsName,
+
+		/// 不是允许的源
+		BabOrigin,
+
+		///已经设置名字
+		AlreadySetName,
+
+	}
+	}
+
+
 decl_event!(
-	pub enum Event<T> where AccountId = <T as frame_system::Trait>::AccountId, Balance = BalanceOf<T> {
+	pub enum Event<T> where AccountId = <T as system::Trait>::AccountId, Balance = BalanceOf<T> {
 		/// A name was set.
 		NameSet(AccountId),
 		/// A name was forcibly set.
@@ -97,26 +125,17 @@ decl_event!(
 	}
 );
 
-decl_error! {
-	/// Error for the nicks module.
-	pub enum Error for Module<T: Trait> {
-		/// A name is too short.
-		TooShort,
-		/// A name is too long.
-		TooLong,
-		/// An account isn't named.
-		Unnamed,
-	}
-}
+
 
 decl_module! {
-	/// Nicks module declaration.
+	// Simple declaration of the `Module` type. Lets the macro know what it's working on.
 	pub struct Module<T: Trait> for enum Call where origin: T::Origin {
-		type Error = Error<T>;
 
+		type Error = Error<T>;
 		fn deposit_event() = default;
 
 		/// Reservation fee.
+		// 设置名字需要抵押吗
 		const ReservationFee: BalanceOf<T> = T::ReservationFee::get();
 
 		/// The minimum length a name may be.
@@ -141,24 +160,29 @@ decl_module! {
 		/// - One storage read/write.
 		/// - One event.
 		/// # </weight>
-		#[weight = 50_000_000]
+		#[weight = 50_000]
 		fn set_name(origin, name: Vec<u8>) {
 			let sender = ensure_signed(origin)?;
 
-			ensure!(name.len() >= T::MinLength::get(), Error::<T>::TooShort);
-			ensure!(name.len() <= T::MaxLength::get(), Error::<T>::TooLong);
+			ensure!(name.len() >= T::MinLength::get(), Error::<T>::NameTooShort);
+			ensure!(name.len() <= T::MaxLength::get(), Error::<T>::NameTooLong);
 
-			let deposit = if let Some((_, deposit)) = <NameOf<T>>::get(&sender) {
-				Self::deposit_event(RawEvent::NameSet(sender.clone()));
-				deposit
-			} else {
-				let deposit = T::ReservationFee::get();
-				T::Currency::reserve(&sender, deposit.clone())?;
-				Self::deposit_event(RawEvent::NameChanged(sender.clone()));
-				deposit
-			};
+			// 名字不能用相同
+			ensure!(!<AccountIdOf<T>>::contains_key(name.clone()),Error::<T>::ExistsName);
+			ensure!(!<NameOf<T>>::contains_key(&sender), Error::<T>::AlreadySetName);
 
-			<NameOf<T>>::insert(&sender, (name, deposit));
+//			let deposit = if let Some((_, deposit)) = <NameOf<T>>::get(&sender) {
+//				Self::deposit_event(RawEvent::NameSet(sender.clone()));
+//				deposit
+//			} else {
+			let deposit = T::ReservationFee::get();
+			T::Currency_n::reserve(&sender, deposit.clone())?;
+			Self::deposit_event(RawEvent::NameChanged(sender.clone()));
+//			deposit
+//			};
+
+			<NameOf<T>>::insert(&sender, (name.clone(), deposit));
+			<AccountIdOf<T>>::insert(name.clone(), sender.clone());
 		}
 
 		/// Clear an account's name and return the deposit. Fails if the account was not named.
@@ -171,16 +195,20 @@ decl_module! {
 		/// - One storage read/write.
 		/// - One event.
 		/// # </weight>
-		#[weight = 70_000_000]
-		fn clear_name(origin) {
-			let sender = ensure_signed(origin)?;
-
-			let deposit = <NameOf<T>>::take(&sender).ok_or(Error::<T>::Unnamed)?.1;
-
-			let _ = T::Currency::unreserve(&sender, deposit.clone());
-
-			Self::deposit_event(RawEvent::NameCleared(sender, deposit));
-		}
+//		#[weight = SimpleDispatchInfo::FixedNormal(70_000)]
+//		fn clear_name(origin) {
+//			let sender = ensure_signed(origin)?;
+//
+//			let account_info = <NameOf<T>>::take(&sender).ok_or(Error::<T>::NotExistsName)?;
+//			let deposit = account_info.1;
+//			let name = account_info.0;
+//
+//			let _ = T::Currency_n::unreserve(&sender, deposit.clone());
+//
+//			<AccountIdOf<T>>::remove(name);
+//
+//			Self::deposit_event(RawEvent::NameCleared(sender, deposit));
+//		}
 
 		/// Remove an account's name and take charge of the deposit.
 		///
@@ -195,16 +223,26 @@ decl_module! {
 		/// - One storage read/write.
 		/// - One event.
 		/// # </weight>
-		#[weight = 70_000_000]
+		#[weight = 70_000]
+		// 这个方法估计是只有议会成员与root才能执行
+		// 惩罚掉并且扣除他的押金
 		fn kill_name(origin, target: <T::Lookup as StaticLookup>::Source) {
-			T::ForceOrigin::ensure_origin(origin)?;
+//			T::ForceOrigin::try_origin(origin)
+//				.map(|_| ())
+//				.or_else(ensure_root)
+//				.map_err(|_| Error::<T>::BabOrigin)?;
+			ensure_root(origin)?;
 
 			// Figure out who we're meant to be clearing.
 			let target = T::Lookup::lookup(target)?;
 			// Grab their deposit (and check that they have one).
-			let deposit = <NameOf<T>>::take(&target).ok_or(Error::<T>::Unnamed)?.1;
+			let account_info = <NameOf<T>>::take(&target).ok_or(Error::<T>::NotExistsName)?;
+			let deposit = account_info.1;
+			let name = account_info.0;
+			<AccountIdOf<T>>::remove(name);
+
 			// Slash their deposit from them.
-			T::Slashed::on_unbalanced(T::Currency::slash_reserved(&target, deposit.clone()).0);
+			T::Slashed::on_unbalanced(T::Currency_n::slash_reserved(&target, deposit.clone()).0);
 
 			Self::deposit_event(RawEvent::NameKilled(target, deposit));
 		}
@@ -221,13 +259,43 @@ decl_module! {
 		/// - One storage read/write.
 		/// - One event.
 		/// # </weight>
-		#[weight = 70_000_000]
+		#[weight = 70_000]
+		// 这个方法估计是只有议会成员与root才能执行
+		// 不需要对名字长度进行检查  并且对方如果之前有命名过才会抵押他的金额 否则强制命名
 		fn force_name(origin, target: <T::Lookup as StaticLookup>::Source, name: Vec<u8>) {
-			T::ForceOrigin::ensure_origin(origin)?;
+//			T::ForceOrigin::try_origin(origin)
+//				.map(|_| ())
+//				.or_else(ensure_root)
+//				.map_err(|_| Error::<T>::BabOrigin)?;
+			ensure_root(origin)?;
 
 			let target = T::Lookup::lookup(target)?;
+
 			let deposit = <NameOf<T>>::get(&target).map(|x| x.1).unwrap_or_else(Zero::zero);
-			<NameOf<T>>::insert(&target, (name, deposit));
+			<NameOf<T>>::insert(&target, (name.clone(), deposit));
+
+			// 如果这个名字已经被占用
+			if let old_id = <AccountIdOf<T>>::get(name.clone()) {
+					// 如果不是他本人占用
+					if old_id.clone() != target.clone(){
+						if let Some(account_info) = <NameOf<T>>::get(&old_id){
+
+						let old_name = account_info.clone().0;
+						let old_deposit = account_info.clone().1;
+
+						<AccountIdOf<T>>::remove(old_name.clone());
+
+						// 归还old_name抵押
+						let _ = T::Currency_n::unreserve(&old_id, old_deposit.clone());
+
+						 <NameOf<T>>::remove(&old_id);
+
+			}
+					}
+
+			}
+
+			<AccountIdOf<T>>::insert(name.clone(), target.clone());
 
 			Self::deposit_event(RawEvent::NameForced(target));
 		}
@@ -238,25 +306,23 @@ decl_module! {
 mod tests {
 	use super::*;
 
-	use frame_support::{
-		assert_ok, assert_noop, impl_outer_origin, parameter_types, weights::Weight,
-		ord_parameter_types
-	};
-	use sp_core::H256;
-	use frame_system::EnsureSignedBy;
+	use support::{assert_ok, assert_noop, impl_outer_origin, parameter_types, weights::Weight};
+	use primitives::H256;
+	use system::EnsureSignedBy;
 	// The testing primitives are very useful for avoiding having to work with signatures
 	// or public keys. `u64` is used as the `AccountId` and no `Signature`s are required.
 	use sp_runtime::{
-		Perbill, testing::Header, traits::{BlakeTwo256, IdentityLookup, BadOrigin},
+		Perbill, testing::Header, traits::{BlakeTwo256, IdentityLookup},
 	};
 
 	impl_outer_origin! {
-		pub enum Origin for Test  where system = frame_system {}
+		pub enum Origin for Test {}
 	}
 
-	// For testing the pallet, we construct most of a mock runtime. This means
+	// For testing the module, we construct most of a mock runtime. This means
 	// first constructing a configuration type (`Test`) which `impl`s each of the
-	// configuration traits of pallets we want to use.
+	// configuration traits of modules we want to use.
+
 	#[derive(Clone, Eq, PartialEq)]
 	pub struct Test;
 	parameter_types! {
@@ -265,7 +331,7 @@ mod tests {
 		pub const MaximumBlockLength: u32 = 2 * 1024;
 		pub const AvailableBlockRatio: Perbill = Perbill::one();
 	}
-	impl frame_system::Trait for Test {
+	impl system::Trait for Test {
 		type Origin = Origin;
 		type Index = u64;
 		type BlockNumber = u64;
@@ -278,59 +344,55 @@ mod tests {
 		type Event = ();
 		type BlockHashCount = BlockHashCount;
 		type MaximumBlockWeight = MaximumBlockWeight;
-		type DbWeight = ();
-		type BlockExecutionWeight = ();
-		type ExtrinsicBaseWeight = ();
-		type MaximumExtrinsicWeight = MaximumBlockWeight;
 		type MaximumBlockLength = MaximumBlockLength;
 		type AvailableBlockRatio = AvailableBlockRatio;
 		type Version = ();
-		type ModuleToIndex = ();
-		type AccountData = pallet_balances::AccountData<u64>;
-		type OnNewAccount = ();
-		type OnKilledAccount = ();
 	}
 	parameter_types! {
-		pub const ExistentialDeposit: u64 = 1;
+		pub const ExistentialDeposit: u64 = 0;
+		pub const TransferFee: u64 = 0;
+		pub const CreationFee: u64 = 0;
 	}
-	impl pallet_balances::Trait for Test {
+	impl balances::Trait for Test {
 		type Balance = u64;
+		type OnFreeBalanceZero = ();
+		type OnNewAccount = ();
 		type Event = ();
+		type TransferPayment = ();
 		type DustRemoval = ();
 		type ExistentialDeposit = ExistentialDeposit;
-		type AccountStore = System;
+		type TransferFee = TransferFee;
+		type CreationFee = CreationFee;
 	}
 	parameter_types! {
 		pub const ReservationFee: u64 = 2;
 		pub const MinLength: usize = 3;
 		pub const MaxLength: usize = 16;
-	}
-	ord_parameter_types! {
 		pub const One: u64 = 1;
 	}
 	impl Trait for Test {
 		type Event = ();
-		type Currency = Balances;
+		type Currency_n = Balances;
 		type ReservationFee = ReservationFee;
 		type Slashed = ();
 		type ForceOrigin = EnsureSignedBy<One, u64>;
 		type MinLength = MinLength;
 		type MaxLength = MaxLength;
 	}
-	type System = frame_system::Module<Test>;
-	type Balances = pallet_balances::Module<Test>;
+	type Balances = balances::Module<Test>;
 	type Nicks = Module<Test>;
 
 	// This function basically just builds a genesis storage key/value store according to
 	// our desired mockup.
-	fn new_test_ext() -> sp_io::TestExternalities {
-		let mut t = frame_system::GenesisConfig::default().build_storage::<Test>().unwrap();
+	fn new_test_ext() -> runtime_io::TestExternalities {
+		let mut t = system::GenesisConfig::default().build_storage::<Test>().unwrap();
 		// We use default for brevity, but you can configure as desired if needed.
-		pallet_balances::GenesisConfig::<Test> {
+		balances::GenesisConfig::<Test> {
 			balances: vec![
 				(1, 10),
 				(2, 10),
 			],
+			vesting: vec![],
 		}.assimilate_storage(&mut t).unwrap();
 		t.into()
 	}
@@ -351,13 +413,13 @@ mod tests {
 		new_test_ext().execute_with(|| {
 			assert_noop!(
 				Nicks::set_name(Origin::signed(2), b"Dr. David Brubeck, III".to_vec()),
-				Error::<Test>::TooLong,
+				"Name too long"
 			);
 
 			assert_ok!(Nicks::set_name(Origin::signed(2), b"Dave".to_vec()));
-			assert_eq!(Balances::reserved_balance(2), 2);
+			assert_eq!(Balances::reserved_balance(&2), 2);
 			assert_ok!(Nicks::force_name(Origin::signed(1), 2, b"Dr. David Brubeck, III".to_vec()));
-			assert_eq!(Balances::reserved_balance(2), 2);
+			assert_eq!(Balances::reserved_balance(&2), 2);
 			assert_eq!(<NameOf<Test>>::get(2).unwrap(), (b"Dr. David Brubeck, III".to_vec(), 2));
 		});
 	}
@@ -366,39 +428,36 @@ mod tests {
 	fn normal_operation_should_work() {
 		new_test_ext().execute_with(|| {
 			assert_ok!(Nicks::set_name(Origin::signed(1), b"Gav".to_vec()));
-			assert_eq!(Balances::reserved_balance(1), 2);
-			assert_eq!(Balances::free_balance(1), 8);
+			assert_eq!(Balances::reserved_balance(&1), 2);
+			assert_eq!(Balances::free_balance(&1), 8);
 			assert_eq!(<NameOf<Test>>::get(1).unwrap().0, b"Gav".to_vec());
 
 			assert_ok!(Nicks::set_name(Origin::signed(1), b"Gavin".to_vec()));
-			assert_eq!(Balances::reserved_balance(1), 2);
-			assert_eq!(Balances::free_balance(1), 8);
+			assert_eq!(Balances::reserved_balance(&1), 2);
+			assert_eq!(Balances::free_balance(&1), 8);
 			assert_eq!(<NameOf<Test>>::get(1).unwrap().0, b"Gavin".to_vec());
 
 			assert_ok!(Nicks::clear_name(Origin::signed(1)));
-			assert_eq!(Balances::reserved_balance(1), 0);
-			assert_eq!(Balances::free_balance(1), 10);
+			assert_eq!(Balances::reserved_balance(&1), 0);
+			assert_eq!(Balances::free_balance(&1), 10);
 		});
 	}
 
 	#[test]
 	fn error_catching_should_work() {
 		new_test_ext().execute_with(|| {
-			assert_noop!(Nicks::clear_name(Origin::signed(1)), Error::<Test>::Unnamed);
+			assert_noop!(Nicks::clear_name(Origin::signed(1)), "Not named");
 
-			assert_noop!(
-				Nicks::set_name(Origin::signed(3), b"Dave".to_vec()),
-				pallet_balances::Error::<Test, _>::InsufficientBalance
-			);
+			assert_noop!(Nicks::set_name(Origin::signed(3), b"Dave".to_vec()), "not enough free funds");
 
-			assert_noop!(Nicks::set_name(Origin::signed(1), b"Ga".to_vec()), Error::<Test>::TooShort);
+			assert_noop!(Nicks::set_name(Origin::signed(1), b"Ga".to_vec()), "Name too short");
 			assert_noop!(
 				Nicks::set_name(Origin::signed(1), b"Gavin James Wood, Esquire".to_vec()),
-				Error::<Test>::TooLong
+				"Name too long"
 			);
 			assert_ok!(Nicks::set_name(Origin::signed(1), b"Dave".to_vec()));
-			assert_noop!(Nicks::kill_name(Origin::signed(2), 1), BadOrigin);
-			assert_noop!(Nicks::force_name(Origin::signed(2), 1, b"Whatever".to_vec()), BadOrigin);
+			assert_noop!(Nicks::kill_name(Origin::signed(2), 1), "bad origin");
+			assert_noop!(Nicks::force_name(Origin::signed(2), 1, b"Whatever".to_vec()), "bad origin");
 		});
 	}
 }

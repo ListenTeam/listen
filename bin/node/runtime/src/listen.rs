@@ -208,7 +208,6 @@ pub struct GroupInfo<AccountId, Balance, AllProps, Audio, BlockNumber, GroupMaxM
 	is_voting: bool,  // 是否出于投票状态
 	create_time: Moment,
 
-//	red_packets: BTreeMap, // 红包
 }
 
 
@@ -706,45 +705,9 @@ decl_module! {
 
 			let mut room = <AllRoom<T>>::get(group_id).unwrap();
 
-
-			// 该群还未处于投票状态
-			ensure!(!room.is_voting.clone(), Error::<T>::IsVoting);
-
-			// 转创建群时费用的1/10转到国库
-			let disband_payment = Percent::from_percent(10) * room.create_payment.clone();
-
-			let to = <treasury::Module<T>>::account_id();
-			T::Currency::transfer(&who, &to, disband_payment, KeepAlive)?;
-
-			room.is_voting = true;
-			room.this_disband_start_time = Self::now();
-
-			// 自己申请的 算自己赞成一票
-			room.disband_vote.approve_man.insert(who.clone());
-
-			<AllRoom<T>>::insert(group_id, room);
-
-			Self::deposit_event(RawEvent::AskForDisband(who.clone(), group_id));
-			Ok(())
-		}
-
-
-		/// 投票
-		#[weight = 10_000]
-		fn vote(origin, group_id: u64, vote: VoteType) -> DispatchResult{
-			let who = ensure_signed(origin)?;
-			// 该群必须存在
-			ensure!(<AllRoom<T>>::contains_key(group_id), Error::<T>::RoomNotExists);
-			// 举报人必须是群里的成员
-			ensure!(<ListenersOfRoom<T>>::contains_key(group_id, who.clone()), Error::<T>::NotInRoom);
-
-			let mut room = <AllRoom<T>>::get(group_id).unwrap();
-
-			// 正在投票
-			ensure!(room.is_voting, Error::<T>::NotVoting);
-
 			let now = Self::now();
 
+			// 如果有上一次解散记录
 			if room.last_disband_end_hight > T::BlockNumber::from(0u32){
 				let until = now.clone() - room.last_disband_end_hight;
 
@@ -782,6 +745,44 @@ decl_module! {
 			}
 
 			}
+
+			// 该群还未处于投票状态
+			ensure!(!room.is_voting.clone(), Error::<T>::IsVoting);
+
+			// 转创建群时费用的1/10转到国库
+			let disband_payment = Percent::from_percent(10) * room.create_payment.clone();
+
+			let to = <treasury::Module<T>>::account_id();
+			T::Currency::transfer(&who, &to, disband_payment, KeepAlive)?;
+
+			room.is_voting = true;
+			room.this_disband_start_time = Self::now();
+
+			// 自己申请的 算自己赞成一票
+			room.disband_vote.approve_man.insert(who.clone());
+
+			<AllRoom<T>>::insert(group_id, room);
+
+			Self::deposit_event(RawEvent::AskForDisband(who.clone(), group_id));
+			Ok(())
+		}
+
+
+		/// 给解散群的提案投票
+		#[weight = 10_000]
+		fn vote(origin, group_id: u64, vote: VoteType) -> DispatchResult{
+			let who = ensure_signed(origin)?;
+			// 该群必须存在
+			ensure!(<AllRoom<T>>::contains_key(group_id), Error::<T>::RoomNotExists);
+			// 举报人必须是群里的成员
+			ensure!(<ListenersOfRoom<T>>::contains_key(group_id, who.clone()), Error::<T>::NotInRoom);
+
+			let mut room = <AllRoom<T>>::get(group_id).unwrap();
+
+			// 正在投票
+			ensure!(room.is_voting, Error::<T>::NotVoting);
+
+			let now = Self::now();
 
 			// 不能二次投票
 			match vote {
@@ -1204,7 +1205,6 @@ impl <T: Trait> Module <T> {
 		}
 
 		}
-
 
 	}
 

@@ -19,6 +19,7 @@ sp-runtime = { version = "2.0.0-rc3", default-features = false, path = "../../pr
 frame-benchmarking = { version = "2.0.0-rc3", default-features = false, path = "../benchmarking", optional = true }
 frame-support = { version = "2.0.0-rc3", default-features = false, path = "../support" }
 frame-system = { version = "2.0.0-rc3", default-features = false, path = "../system" }
+pallet-nicks = {version = "2.0.0-rc3", default-features = false, path = "../nicks" }
 
 [dev-dependencies]
 sp-io = { version = "2.0.0-rc3", path = "../../primitives/io" }
@@ -35,5 +36,6 @@ std = [
 	"frame-benchmarking/std",
 	"frame-support/std",
 	"frame-system/std",
+	"pallet-nicks/std",
 ]
 runtime-benchmarks = ["frame-benchmarking"]

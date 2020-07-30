@@ -842,6 +842,26 @@ impl pallet_identity::Trait for Runtime {
 	type RegistrarOrigin = EnsureRootOrHalfCouncil;
 }
 
+parameter_types!{
+	pub const ReservationFee: Balance = 10*DOLLARS;
+	pub const MinLength: usize = 3;
+	pub const MaxLength: usize = 20;
+
+}
+
+impl pallet_nicks::Trait for Runtime{
+	type Event = Event;
+	type Currency_n = Balances;
+	type ReservationFee = ReservationFee;
+	type Slashed = ();
+	// 技术委员会
+	type ForceOrigin = pallet_collective::EnsureMember<AccountId, TechnicalCollective>;
+	type MinLength = MinLength;
+	type MaxLength = MaxLength;
+
+}
+
+
 parameter_types! {
 	pub const ConfigDepositBase: Balance = 5 * DOLLARS;
 	pub const FriendDepositFactor: Balance = 50 * CENTS;
@@ -939,6 +959,7 @@ construct_runtime!(
 		GenericAsset: generic_asset::{Module, Storage, Call, Event<T>, Config<T>},
 		ListenCommitee: pallet_collective::<Instance3>::{Module, Call, Storage, Origin<T>, Event<T>, Config<T>},
 		Listen: listen::{Module, Storage, Call, Event<T>},
+		Nicks: pallet_nicks::{Module, Call, Storage, Event<T>},
 	}
 );
 

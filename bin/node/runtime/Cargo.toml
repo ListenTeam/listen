@@ -81,6 +81,7 @@ pallet-transaction-payment = { version = "2.0.0-rc3", default-features = false, 
 pallet-transaction-payment-rpc-runtime-api = { version = "2.0.0-rc3", default-features = false, path = "../../../frame/transaction-payment/rpc/runtime-api/" }
 pallet-vesting = { version = "2.0.0-rc3", default-features = false, path = "../../../frame/vesting" }
 pallet-generic-asset = { version = "2.0.0-rc3", default-features = false, path = "../../../frame/generic-asset" }
+pallet-nicks = { version = "2.0.0-rc3", default-features = false, path = "../../../frame/nicks" }
 
 [build-dependencies]
 wasm-builder-runner = { version = "1.0.5", package = "substrate-wasm-builder-runner", path = "../../../utils/wasm-builder-runner" }
@@ -146,6 +147,7 @@ std = [
 	"pallet-recovery/std",
 	"pallet-vesting/std",
 	"pallet-generic-asset/std",
+	"pallet-nicks/std",
 ]
 runtime-benchmarks = [
 	"frame-benchmarking",
