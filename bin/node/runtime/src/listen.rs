@@ -342,6 +342,7 @@ decl_storage! {
 		pub RedPacketOfRoom get(fn red_packets_of_room): double_map hasher(blake2_128_concat) u64, hasher(blake2_128_concat) u128 =>
 		RedPacket<T::AccountId, BTreeSet<T::AccountId>, BalanceOf<T>, T::BlockNumber>;
 
+		/// 多签账号的信息 （[参与多签的人员id] 阀值 多签账号）
 		pub Multisig get(fn multisig): Option<(Vec<T::AccountId>, u16, T::AccountId)>;
 
 		/// 踢人的时间限制
@@ -455,6 +456,16 @@ decl_module! {
 
 	pub struct Module<T: Trait> for enum Call where origin: T::Origin {
 		// Initializing events
+
+		/// 空投一次投多少token
+		const AirDropReward: BalanceOf<T> = T::AirDropReward::get();
+		/// 解散群提案可以存在多长时间
+		const VoteExistsHowLong: T::BlockNumber = T::VoteExistsHowLong::get();
+		/// 每个人原则上领取的最小红包金额
+		const RedPacketMinAmount: BalanceOf<T> = T::RedPacketMinAmount::get();
+		/// 红包存在多长时间
+		const RedPackExpire: T::BlockNumber = T::RedPackExpire::get();
+
 		type Error = Error<T>;
 		fn deposit_event() = default;
 
@@ -474,8 +485,8 @@ decl_module! {
 		#[weight = 10_000]
 		fn air_drop(origin, des: T::AccountId) -> DispatchResult{
 
-			// 空投的账号必须是listen基金会成员
-			let who = T::ListenFounders::ensure_origin(origin)?;
+			// 执行空投的账号
+			let who = ensure_signed(origin)?;
 
 			/// 获取多签账号id
 			let (_, _, multisig_id) = <Multisig<T>>::get().ok_or(Error::<T>::MultisigIdIsNone)?;
@@ -792,7 +803,7 @@ decl_module! {
 		}
 
 
-		/// 要求解散群
+		/// 群员要求解散群
 		#[weight = 10_000]
 		fn ask_for_disband_room(origin, group_id: u64) -> DispatchResult{
 			let who = ensure_signed(origin)?;
@@ -866,7 +877,7 @@ decl_module! {
 		}
 
 
-		/// 设置语音价格
+		/// 设置语音单价
 		#[weight = 10_000]
 		fn set_audio_cost(origin, cost: AudioCost<BalanceOf<T>>){
 			ensure_root(origin)?;
@@ -875,7 +886,7 @@ decl_module! {
 		}
 
 
-		/// 设置道具价格
+		/// 设置道具单价
 		#[weight = 10_000]
 		fn set_props_cost(origin, cost: PropsCost<BalanceOf<T>>){
 			ensure_root(origin)?;
@@ -1008,7 +1019,7 @@ decl_module! {
 		}
 
 
-		/// 领取币
+		/// 一键领取自己的所有奖励
 		#[weight = 10_000]
 		fn pay_out(origin) -> DispatchResult {
 			// 未领取奖励的有三种可能 一种是群没有解散 一种是群解散了未领取 一种是过期了但是还没有打过期标签
