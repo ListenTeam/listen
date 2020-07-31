@@ -111,6 +111,34 @@
 	"audio": "Audio",
 	"cost": "Balance",
 	"rooms": "Vec<(u64, RewardStatus)>"
+},
+
+"AudioCost":{
+    "ten_seconds": "Balance",
+    "thirty_seconds": "Balance",
+    "minutes": "Balance"
+},
+
+"PropsCost":{
+    "picture": "Balance",
+    "text": "Balance",
+    "video": "Balance"
+},
+
+"DisbandTime":{
+    "Ten": "BlockNumber",
+    "Hundred": "BlockNumber",
+    "FiveHundred": "BlockNumber",
+    "TenThousand": "BlockNumber",
+    "NoLimit": "BlockNumber"
+},
+
+"KickTime":{
+    "Ten": "BlockNumber",
+    "Hundred": "BlockNumber",
+    "FiveHundred": "BlockNumber",
+    "TenThousand": "BlockNumber",
+    "NoLimit": "BlockNumber"
 }
 
 }

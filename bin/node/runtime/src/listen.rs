@@ -10,13 +10,14 @@ use system::{ensure_signed, ensure_root};
 use sp_runtime::{DispatchResult, Percent, RuntimeDebug, traits::CheckedMul};
 use pallet_timestamp as timestamp;
 use node_primitives::{Balance, AccountId};
-use crate::constants::currency::*;
+use crate::constants::{currency::*, time::*};
 use sp_io::hashing::blake2_256;
 
 use pallet_treasury as treasury;
 use codec::{Encode, Decode};
 use vote::*;
 use hex_literal::hex;
+use listen_time::*;
 
 type SessionIndex = u32;
 type RoomId = u64;
@@ -32,6 +33,70 @@ pub mod vote{
 	pub const NotEnd: bool = false;
 }
 
+
+/// 群主踢人的时间限制
+#[derive(PartialEq, Encode, Decode, Default, RuntimeDebug, Clone)]
+pub struct KickTime<BlockNumber>{
+	Ten: BlockNumber,
+	Hundred: BlockNumber,
+	FiveHundred: BlockNumber,
+	TenThousand: BlockNumber,
+	NoLimit: BlockNumber,
+}
+
+
+/// 群解散的时间限制
+#[derive(PartialEq, Encode, Decode, Default, RuntimeDebug, Clone)]
+pub struct DisbandTime<BlockNumber>{
+	Ten: BlockNumber,
+	Hundred: BlockNumber,
+	FiveHundred: BlockNumber,
+	TenThousand: BlockNumber,
+	NoLimit: BlockNumber,
+}
+
+/// 道具的费用
+#[derive(PartialEq, Encode, Decode, Default, RuntimeDebug, Clone)]
+pub struct PropsCost<BalanceOf>{
+	picture: BalanceOf,
+	text: BalanceOf,
+	video: BalanceOf,
+}
+
+
+/// 语音的费用
+#[derive(PartialEq, Encode, Decode, Default, RuntimeDebug, Clone)]
+pub struct AudioCost<BalanceOf>{
+	ten_seconds: BalanceOf,
+	thirty_seconds: BalanceOf,
+	minutes: BalanceOf,
+}
+
+
+pub mod listen_time{
+
+	// 踢人的时间限制
+	pub mod kick{
+		use node_primitives::BlockNumber;
+		use crate::constants::time::*;
+		pub const Ten: BlockNumber = 7 * DAYS;
+		pub const Hundred: BlockNumber = 1 * DAYS;
+		pub const FiveHundred: BlockNumber = 12 * HOURS;
+		pub const TenThousand: BlockNumber = 8 * HOURS;
+		pub const NoLimit: BlockNumber = 6 * HOURS;
+	}
+
+	// 解散群的时间限制
+	pub mod disband {
+		use node_primitives::BlockNumber;
+		use crate::constants::time::*;
+		pub const Ten: BlockNumber = 1 * DAYS;
+		pub const FiveHundred: BlockNumber = 15 * DAYS;
+		pub const Hundred: BlockNumber = 7 * DAYS;
+		pub const TenThousand: BlockNumber = 30 * DAYS;
+		pub const NoLimit: BlockNumber = 60 * DAYS;
+	}
+}
 
 /// 所有道具的统计
 #[derive(PartialEq, Encode, Decode, Default, RuntimeDebug, Clone)]
@@ -279,6 +344,38 @@ decl_storage! {
 
 		pub Multisig get(fn multisig): Option<(Vec<T::AccountId>, u16, T::AccountId)>;
 
+		/// 踢人的时间限制
+		pub KickTimeLimit get(fn kick_time_limit): KickTime<T::BlockNumber> = KickTime{
+			Ten: T::BlockNumber::from(kick::Ten),
+			Hundred: T::BlockNumber::from(kick::Hundred),
+			FiveHundred: T::BlockNumber::from(kick::FiveHundred),
+			TenThousand: T::BlockNumber::from(kick::TenThousand),
+			NoLimit: T::BlockNumber::from(kick::NoLimit),
+		};
+
+		/// 解散群的时间限制
+		pub DisbandTimeLimit get(fn disband_time_limit): DisbandTime<T::BlockNumber> = DisbandTime{
+			Ten: T::BlockNumber::from(disband::Ten),
+			Hundred: T::BlockNumber::from(disband::Hundred),
+			FiveHundred: T::BlockNumber::from(disband::FiveHundred),
+			TenThousand: T::BlockNumber::from(disband::TenThousand),
+			NoLimit: T::BlockNumber::from(disband::NoLimit),
+		};
+
+		/// 道具的费用
+		pub PropsPayment get(fn props_payment): PropsCost<BalanceOf<T>> = PropsCost{
+			picture: <BalanceOf<T> as TryFrom::<Balance>>::try_from(Percent::from_percent(3) * DOLLARS).ok().unwrap(),
+			text: <BalanceOf<T> as TryFrom::<Balance>>::try_from(Percent::from_percent(1) * DOLLARS).ok().unwrap(),
+			video: <BalanceOf<T> as TryFrom::<Balance>>::try_from(Percent::from_percent(3) * DOLLARS).ok().unwrap(),
+		};
+
+		/// 语音的费用
+		pub AudioPayment get(fn audio_payment): AudioCost<BalanceOf<T>> = AudioCost{
+			ten_seconds: <BalanceOf<T> as TryFrom::<Balance>>::try_from(Percent::from_percent(1) * DOLLARS).ok().unwrap(),
+			thirty_seconds: <BalanceOf<T> as TryFrom::<Balance>>::try_from(Percent::from_percent(2) * DOLLARS).ok().unwrap(),
+			minutes: <BalanceOf<T> as TryFrom::<Balance>>::try_from(Percent::from_percent(2) * DOLLARS).ok().unwrap(),
+		};
+
 	}
 }
 
@@ -513,6 +610,8 @@ decl_module! {
 		fn buy_props_in_room(origin, group_id: u64, props: AllProps) -> DispatchResult{
 			let who = ensure_signed(origin)?;
 
+			let props_cost = <PropsPayment<T>>::get();
+
 			// 该群必须存在
 			ensure!(<AllRoom<T>>::contains_key(group_id), Error::<T>::RoomNotExists);
 
@@ -520,20 +619,19 @@ decl_module! {
 			ensure!(<ListenersOfRoom<T>>::contains_key(group_id, who.clone()), Error::<T>::NotInRoom);
 
 			// 计算道具总费用
-			let mut dollars = 0u128;
+			let mut dollars = <BalanceOf<T>>::from(0u32);
 			if props.picture > 032{
-				dollars = 1u128 * DOLLARS / 100u128 * 2u128 * (props.picture as u128);
+				dollars = props_cost.picture * <BalanceOf<T>>::from(props.picture);
 			}
 			if props.text > 032{
-				dollars += 1u128 * DOLLARS / 100u128 * (props.text as u128);
+				dollars += props_cost.text * <BalanceOf<T>>::from(props.text);
 			}
 			if props.video > 032{
-				dollars += 1u128 * DOLLARS / 100u128 * 3u128 * (props.video as u128);
+				dollars += props_cost.video * <BalanceOf<T>>::from(props.video);
 			}
 
 			// 把U128转换成balance
-			let cost = < BalanceOf<T> as TryFrom::<Balance>>::try_from(dollars).map_err(|_| Error::<T>::ConvertErr)?;
-
+			let cost = dollars;
 			// ********以上数据不需要额外处理 不可能出现panic*************
 
 			// 扣除费用
@@ -575,22 +673,22 @@ decl_module! {
 			// 自己在群里
 			ensure!(<ListenersOfRoom<T>>::contains_key(group_id, who.clone()), Error::<T>::NotInRoom);
 
+			let audio_cost = <AudioPayment<T>>::get();
 			// 计算道具总费用
-			let mut dollars = 0u128;
+			let mut dollars = <BalanceOf<T>>::from(0u32);
 			if audio.ten_seconds > 032{
-				dollars = 1u128 * DOLLARS / 100u128 * (audio.ten_seconds as u128);
+				dollars = audio_cost.ten_seconds * <BalanceOf<T>>::from(audio.ten_seconds);
 			}
 			if audio.thirty_seconds > 032{
-				dollars += 1u128 * DOLLARS / 100u128 * 2u128 * (audio.thirty_seconds as u128);
+				dollars += audio_cost.thirty_seconds * <BalanceOf<T>>::from(audio.thirty_seconds);
 			}
 
 			if audio.minutes > 032{
-				dollars += 1u128 * DOLLARS / 100u128 * 3u128 * (audio.minutes as u128);
+				dollars += audio_cost.minutes * <BalanceOf<T>>::from(audio.minutes);
 			}
 
 			// 把U128转换成balance
-			let cost = < BalanceOf<T> as TryFrom::<Balance>>::try_from(dollars).map_err(|_| Error::<T>::ConvertErr)?;
-
+			let cost = dollars;
 			// ********以上数据不需要额外处理 不可能出现panic*************
 
 			// 扣除费用
@@ -642,31 +740,31 @@ decl_module! {
 
 				match room.max_members	{
 				GroupMaxMembers::Ten => {
-					if until <= T::BlockNumber::from(201600u32){
+					if until <= T::BlockNumber::from(kick::Ten){
 						return Err(Error::<T>::NotUntilKickTime)?;
 					}
 
 				},
 				GroupMaxMembers::Hundred => {
-					if until <= T::BlockNumber::from(28800u32){
+					if until <= T::BlockNumber::from(kick::Hundred){
 						return Err(Error::<T>::NotUntilKickTime)?;
 					}
 
 				},
 				GroupMaxMembers::FiveHundred => {
-					if until <= T::BlockNumber::from(14400u32){
+					if until <= T::BlockNumber::from(kick::FiveHundred){
 						return Err(Error::<T>::NotUntilKickTime)?;
 					}
 
 				},
 				GroupMaxMembers::TenThousand => {
-					if until <= T::BlockNumber::from(9600u32){
+					if until <= T::BlockNumber::from(kick::TenThousand){
 						return Err(Error::<T>::NotUntilKickTime)?;
 					}
 
 				},
 				GroupMaxMembers::NoLimit => {
-					if until <= T::BlockNumber::from(7200u32){
+					if until <= T::BlockNumber::from(kick::NoLimit){
 						return Err(Error::<T>::NotUntilKickTime)?;
 					}
 				}
@@ -713,31 +811,31 @@ decl_module! {
 
 				match room.max_members	{
 				GroupMaxMembers::Ten => {
-					if until <= T::BlockNumber::from(28800u32){
+					if until <= T::BlockNumber::from(disband::Ten){
 						return Err(Error::<T>::NotUntilDisbandTime)?;
 					}
 
 				},
 				GroupMaxMembers::Hundred => {
-					if until <= T::BlockNumber::from(201600u32){
+					if until <= T::BlockNumber::from(disband::Hundred){
 						return Err(Error::<T>::NotUntilDisbandTime)?;
 					}
 
 				},
 				GroupMaxMembers::FiveHundred => {
-					if until <= T::BlockNumber::from(432000u32){
+					if until <= T::BlockNumber::from(disband::FiveHundred){
 						return Err(Error::<T>::NotUntilDisbandTime)?;
 					}
 
 				},
 				GroupMaxMembers::TenThousand => {
-					if until <= T::BlockNumber::from(864000u32){
+					if until <= T::BlockNumber::from(disband::TenThousand){
 						return Err(Error::<T>::NotUntilDisbandTime)?;
 					}
 
 				},
 				GroupMaxMembers::NoLimit => {
-					if until <= T::BlockNumber::from(1728000u32){
+					if until <= T::BlockNumber::from(disband::NoLimit){
 						return Err(Error::<T>::NotUntilDisbandTime)?;
 					}
 				}
@@ -765,6 +863,42 @@ decl_module! {
 
 			Self::deposit_event(RawEvent::AskForDisband(who.clone(), group_id));
 			Ok(())
+		}
+
+
+		/// 设置语音价格
+		#[weight = 10_000]
+		fn set_audio_cost(origin, cost: AudioCost<BalanceOf<T>>){
+			ensure_root(origin)?;
+			<AudioPayment<T>>::put(cost);
+			Self::deposit_event(RawEvent::SetAudioCost);
+		}
+
+
+		/// 设置道具价格
+		#[weight = 10_000]
+		fn set_props_cost(origin, cost: PropsCost<BalanceOf<T>>){
+			ensure_root(origin)?;
+			<PropsPayment<T>>::put(cost);
+			Self::deposit_event(RawEvent::SetPropsCost);
+		}
+
+
+		/// 设置群主踢人的时间间隔
+		#[weight = 10_000]
+		fn set_kick_interval(origin, time: KickTime<T::BlockNumber>){
+			ensure_root(origin)?;
+			<KickTimeLimit<T>>::put(time);
+			Self::deposit_event(RawEvent::SetKickInterval);
+		}
+
+
+		/// 设置解散群的时间间隔
+		#[weight = 10_000]
+		fn set_disband_interval(origin, time: DisbandTime<T::BlockNumber>){
+			ensure_root(origin)?;
+			<DisbandTimeLimit<T>>::put(time);
+			Self::deposit_event(RawEvent::SetDisbandInterval);
 		}
 
 
@@ -1297,9 +1431,6 @@ impl <T: Trait> Module <T> {
 
 	}
 
-
-
-
 	}
 
 
@@ -1326,6 +1457,10 @@ decl_event!(
 	 SendRedPocket(u64, u128, Amount),
 	 GetRedPocket(u64, u128, Amount),
 	 JoinCostChanged(u64, Amount),
+	 SetPropsCost,
+	 SetAudioCost,
+	 SetDisbandInterval,
+	 SetKickInterval,
 
 	}
 );

@@ -6,9 +6,9 @@
 * 房间id是自增的u64类型
 ***
 ## 主要方法
-1. 空投 
+1. 空投
 	* 代码: `fn air_drop(origin, des: T::AccountId)`
-	* 参数： 
+	* 参数：
 		- des: 空投的目标地址
 	* 逻辑:
 		- 需要多签权限
@@ -30,7 +30,7 @@
 ***
 3. 创建一个多签的账号(用于空投)
 	* 代码： `fn set_multisig(origin, who: Vec<T::AccountId>, threshould: u16)`
-	* 参数： 
+	* 参数：
 		- who： 参与多签的所有人员id
 		- threshould： 阀值(有多少个人签名就可以执行空投操作)
 	* 逻辑：
@@ -40,7 +40,7 @@
 ***
 4. 进群
 	* 代码： `fn into_room(origin, group_id: u64, invite: T::AccountId, inviter: Option<T::AccountId>, payment_type: Option<InvitePaymentType>)`
-	* 参数： 
+	* 参数：
 		- group_id： 房间号
 		- invite: 被邀请人
 		- inviter: 邀请人(可以为空)
@@ -57,7 +57,7 @@
 ***
 5. 群主修改进群费用
 	* 代码：`fn modify_join_cost(origin, group_id: u64, join_cost: BalanceOf<T>)`
-	* 参数： 
+	* 参数：
 		- group_id： 房间id
 		- join_cost: 费用
 	* 逻辑：
@@ -66,7 +66,7 @@
 ***
 6. 在群里购买道具
 	* 代码： `fn buy_props_in_room(origin, group_id: u64, props: AllProps)`
-	* 参数： 
+	* 参数：
 		- group_id: 房间号
 		- props： 道具类型以及分别需要买多少
 	* 逻辑：
@@ -89,12 +89,12 @@
 		- 扣除费用(费用不够，不给操作)， 并且统计到群里， 等解散后均分
 		- 购买详情个人记录有一份
 	>>> 语音类型有： 10s, 30s, 60s, 具体收费情况看白皮书
-	
+
 ***
 
 8. 群主踢人
 	* 代码： `fn kick_someone(origin, group_id: u64, who: T::AccountId)`
-	* 参数： 
+	* 参数：
 		- group_id： 房间id
 		- who： 即将被踢出群聊的人
 	* 逻辑：
@@ -106,7 +106,7 @@
 ***
 9. 要求解散群
 	* 代码： `fn ask_for_disband_room(origin, group_id: u64)`
-	* 参数： 
+	* 参数：
 		- 房间id： group_id
 	* 逻辑：
 		- 群存在， 并且要求解散的人是群里成员
@@ -118,7 +118,7 @@
 ***
 10. 给解散群的提案进行投票
 	* 代码： `fn vote(origin, group_id: u64, vote: VoteType)`
-	* 参数： 
+	* 参数：
 		- 房间id： group_id
 		- vote： 投票类型(赞成或是反对)
 	* 逻辑：
@@ -139,7 +139,7 @@
 ***
 12. 在群里发红包
 	* 代码： `pub fn send_redpacket_in_room(origin, group_id: u64, lucky_man_number: u32, amount: BalanceOf<T>)`
-	* 参数： 
+	* 参数：
 		- group_id： 房间id
 		- lucky_man_number： 打算发给多少人
 		- amount： 红包总金额
@@ -150,9 +150,9 @@
 		- 红包过期时间是1天
 		- 顺便处理房间所有过期红包
 ***
-14. 在群里收红包
+13. 在群里收红包
 	* 代码： `pub fn get_redpacket_in_room(origin, lucky_man: T::AccountId, group_id: u64, redpacket_id: u128, amount: BalanceOf<T>)`
-	* 参数： 
+	* 参数：
 		- lucky_man： 领给谁
 		- group_id： 房间id
 		- redpacket_id： 红包id
@@ -165,6 +165,26 @@
 		- 红包如果已经过期， 过期则把剩余的金额归还发红包的人
 		- 如果领取红包的人数已经达到上限， 剩余金额归还给发红包的人
 		- 顺便处理群里所有过期红包
+***
+14. 设置语音价格
+    * 代码: `fn set_audio_cost(origin, cost: AudioCost<BalanceOf<T>>)`
+    * 参数: cost(一个结构体，包含每种语音每条收费多少)
+    * 逻辑： root权限
+***
+15. 设置道具价格
+    * 代码: `fn set_props_cost(origin, cost: PropsCost<BalanceOf<T>>)`
+    * 参数: cost(一个结构体， 包含每种道具的价格)
+    * 逻辑： root权限
+***
+16. 设置群主踢人的时间间隔
+    * 代码: `fn set_kick_interval(origin, time: KickTime<T::BlockNumber>)`
+    * 参数: time(一个结构体， 包含每种房间类型多长间隔)
+    * 逻辑: root权限
+***
+17. 设置解散群提案的时间间隔
+    * 代码: `fn set_disband_interval(origin, time: DisbandTime<T::BlockNumber>)`
+    * 参数： time(一个结构体， 包含每种房间类型多长间隔)
+    * 逻辑： root权限
 ***
 ## 主要数据结构
 ```bazaar
@@ -315,3 +335,48 @@ pub struct PersonInfo<AllProps, Audio, Balance, RewardStatus>{
 	rooms: Vec<(RoomId, RewardStatus)>,  // 这个人加入的所有房间
 }
 ```
+***
+```buildoutcfg
+/// 群主踢人的时间限制
+#[derive(PartialEq, Encode, Decode, Default, RuntimeDebug, Clone)]
+pub struct KickTime<BlockNumber>{
+	Ten: BlockNumber,  // 上限人数为10时候
+	Hundred: BlockNumber,  // 上限人数为100时候
+	FiveHundred: BlockNumber,  // 上限人数为500时候
+	TenThousand: BlockNumber,  // 上限人数为10000时候
+	NoLimit: BlockNumber,  // 不作限制的时候
+}
+```
+***
+```buildoutcfg
+/// 群解散的时间限制
+#[derive(PartialEq, Encode, Decode, Default, RuntimeDebug, Clone)]
+pub struct DisbandTime<BlockNumber>{
+	Ten: BlockNumber,  // 上限人数为10时候
+	Hundred: BlockNumber,  // 上限人数为100时候
+	FiveHundred: BlockNumber,  // 上限人数为500时候
+	TenThousand: BlockNumber,  // 上限人数为10000时候
+	NoLimit: BlockNumber,  // 不作限制的时候
+}
+```
+***
+```buildoutcfg
+/// 道具的费用
+#[derive(PartialEq, Encode, Decode, Default, RuntimeDebug, Clone)]
+pub struct PropsCost<BalanceOf>{
+	picture: BalanceOf,  // 图片价格
+	text: BalanceOf,  // 文字价格
+	video: BalanceOf,  // 视频价格
+}
+```
+***
+```buildoutcfg
+/// 语音的费用
+#[derive(PartialEq, Encode, Decode, Default, RuntimeDebug, Clone)]
+pub struct AudioCost<BalanceOf>{
+	ten_seconds: BalanceOf,  // 10秒价格
+	thirty_seconds: BalanceOf,  // 30秒价格
+	minutes: BalanceOf,  // 60秒价格
+}
+```
+***
