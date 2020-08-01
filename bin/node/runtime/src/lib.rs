@@ -80,6 +80,7 @@ pub use pallet_staking::StakerStatus;
 pub mod impls;
 use impls::{CurrencyToVoteHandler, Author, TargetedFeeAdjustment};
 pub mod listen;
+pub mod raw;
 
 /// Constant values used within the runtime.
 pub mod constants;
