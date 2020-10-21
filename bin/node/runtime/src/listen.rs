@@ -340,12 +340,20 @@ decl_module! {
 
 		/// 进群
 		#[weight = 10_000]
-		fn into_room(origin, group_id: u64, invite: T::AccountId, inviter: Option<T::AccountId>, payment_type: Option<InvitePaymentType>) -> DispatchResult{
+		fn into_room(origin, group_id: u64, invite: T::AccountId,  payment_type: Option<InvitePaymentType>) -> DispatchResult{
 			let who = ensure_signed(origin)?;
-			// 如果有邀请人 邀请人不能是自己， 并且要求有付费类型
-			if inviter.is_some(){
-				ensure!(inviter.clone().unwrap() != invite, Error::<T>::InviteYourself);
+
+			// 如果不是自己邀请自己， 则自己是单独进群
+			let mut inviter: Option<T::AccountId>;
+
+			if who.clone() != invite.clone() {
+				inviter = Some(who.clone());
+				// 如果邀请别人 必须有付费类型
 				ensure!(payment_type.is_some(), Error::<T>::MustHavePaymentType);
+			}
+			else{
+				inviter = None;
+
 			}
 
 			let room_info = <AllRoom<T>>::get(group_id).ok_or(Error::<T>::RoomNotExists)?;
@@ -354,9 +362,9 @@ decl_module! {
 			ensure!(room_info.max_members.clone().into_u32()? >= room_info.now_members_number.clone(), Error::<T>::MembersNumberToMax);
 
 			// 如果自己已经在群里 不需要重新进
-			ensure!(!(Self::is_in_room(group_id, who.clone())?), Error::<T>::InRoom);
+			ensure!(!(Self::is_in_room(group_id, invite.clone())?), Error::<T>::InRoom);
 
-			Self::join_do(who.clone(), group_id, inviter.clone(), payment_type.clone())?;
+			Self::join_do(invite.clone(), group_id, inviter.clone(), payment_type.clone())?;
 
 			Self::deposit_event(RawEvent::IntoRoom(who, group_id));
 			Ok(())
