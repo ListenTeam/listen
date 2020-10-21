@@ -472,6 +472,25 @@ decl_module! {
 		}
 
 
+		/// 设置创建群需要的费用
+		#[weight = 10_000]
+		fn set_create_cost(origin, max_members: GroupMaxMembers, amount: Balance) {
+			ensure_root(origin)?;
+
+			match max_members {
+				GroupMaxMembers::Ten => CreatePayment::mutate(|h| h.Ten = amount),
+				GroupMaxMembers::Hundred => CreatePayment::mutate(|h| h.Hundred = amount),
+				GroupMaxMembers::FiveHundred => CreatePayment::mutate(|h| h.FiveHundred = amount),
+				GroupMaxMembers::TenThousand => CreatePayment::mutate(|h| h.TenThousand = amount),
+				GroupMaxMembers::NoLimit => CreatePayment::mutate(|h| h.NoLimit = amount),
+				_ => return Err(Error::<T>::UnknownRoomType)?,
+			}
+
+			Self::deposit_event(RawEvent::SetCreateCost);
+
+		}
+
+
 		/// 群主踢人
 		#[weight = 10_000]
 		fn kick_someone(origin, group_id: u64, who: T::AccountId) -> DispatchResult {
@@ -1220,6 +1239,7 @@ decl_event!(
 	 SetAudioCost,
 	 SetDisbandInterval,
 	 SetKickInterval,
+	 SetCreateCost,
 
 	}
 );
