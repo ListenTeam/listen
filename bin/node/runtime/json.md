@@ -6,6 +6,15 @@
     "text": "u32",
     "video": "u32"
   },
+
+  "CreateCost": {
+    "Ten": "Balance",
+    "Hundred": "Balance",
+    "FiveHundred": "Balance",
+    "TenThousand": "Balance",
+    "NoLimit": "Balance"
+  },
+
   "AssetChangeableParams": {
     "_enum": {
       "MintPledge": "Balance",

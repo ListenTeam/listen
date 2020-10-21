@@ -15,6 +15,29 @@ pub struct KickTime<BlockNumber>{
 	pub NoLimit: BlockNumber,
 }
 
+use node_primitives::Balance;
+use crate::constants::currency::*;
+/// 创建群的费用
+#[derive(PartialEq, Encode, Decode, RuntimeDebug, Clone)]
+pub struct CreateCost{
+	pub Ten: Balance,
+	pub Hundred: Balance,
+	pub FiveHundred: Balance,
+	pub TenThousand: Balance,
+	pub NoLimit: Balance,
+}
+
+impl Default for CreateCost{
+	fn default() -> Self{
+		Self{
+			Ten: 1*DOLLARS,
+			Hundred: 10*DOLLARS,
+			FiveHundred: 30*DOLLARS,
+			TenThousand: 200*DOLLARS,
+			NoLimit: 1000*DOLLARS,
+		}
+	}
+}
 
 /// 群解散的时间限制
 #[derive(PartialEq, Encode, Decode, Default, RuntimeDebug, Clone)]
@@ -118,6 +141,8 @@ impl Default for GroupMaxMembers{
 		Self::Ten
 	}
 }
+
+
 
 /// 语音时长类型的统计
 #[derive(PartialEq, Encode, Decode, Default, RuntimeDebug, Clone)]

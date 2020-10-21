@@ -7,7 +7,7 @@ use frame_support::{debug, ensure, decl_module, decl_storage, decl_error, decl_e
 use frame_system as system;
 use pallet_multisig;
 use system::{ensure_signed, ensure_root};
-use sp_runtime::{DispatchResult, Percent, RuntimeDebug, traits::CheckedMul};
+use sp_runtime::{DispatchResult, Percent, RuntimeDebug, traits::CheckedMul, DispatchError};
 use pallet_timestamp as timestamp;
 use node_primitives::{Balance, AccountId};
 use crate::constants::{currency::*, time::*};
@@ -21,7 +21,7 @@ use listen_time::*;
 
 use crate::raw::{KickTime, DisbandTime, listen_time, PropsCost, AudioCost, AllProps, RoomRewardInfo,
 Audio, DisbandVote, RedPacket, GroupMaxMembers, VoteType, RewardStatus, InvitePaymentType, GroupInfo,
-PersonInfo, vote, ListenerType, SessionIndex, RoomId};
+PersonInfo, vote, ListenerType, SessionIndex, RoomId, CreateCost};
 
 
 type BalanceOf<T> = <<T as treasury::Trait>::Currency as Currency<<T as system::Trait>::AccountId>>::Balance;
@@ -62,6 +62,9 @@ decl_storage! {
 		/// 自增的group_id
 		pub GroupId get(fn group_id): u64 = 1; // 初始化值是1
 
+ 		/// 创建群的费用
+		pub CreatePayment get(fn create_cost): CreateCost;
+
 		/// 自增的红包id
 		pub RedPacketId get(fn red_packet_id): u128 = 1;
 
@@ -69,9 +72,8 @@ decl_storage! {
 		pub AllRoom get(fn all_room): map hasher(blake2_128_concat) u64 => Option<GroupInfo<T::AccountId, BalanceOf<T>,
 		AllProps, Audio, T::BlockNumber, GroupMaxMembers, DisbandVote<BTreeSet<T::AccountId>>, T::Moment>>;
 
-		/// 群里的所有人以及对应的身份 (group_id, account_id => 听众身份)
-		pub ListenersOfRoom get(fn listeners_of_room): double_map hasher(blake2_128_concat) u64, hasher(blake2_128_concat) T::AccountId
-		=> Option<ListenerType>;
+		///群里的所有人
+		pub ListenersOfRoom get(fn listeners_of_room): map hasher(blake2_128_concat) u64 => BTreeSet<T::AccountId>;
 
 		/// 所有人员的信息(购买道具, 购买语音, 以及加入的群)
 		pub AllListeners get(fn all_listeners): map hasher(blake2_128_concat) T::AccountId => PersonInfo<AllProps, Audio, BalanceOf<T>, RewardStatus>;
@@ -134,6 +136,8 @@ decl_error! {
 		CreatePaymentErr,
 		/// 房间不存在
 		RoomNotExists,
+		/// 房间里没有任何人
+		RoomEmpty,
 		/// 已经邀请此人
 		AlreadyInvited,
 		/// 自由余额金额不足以抵押
@@ -192,6 +196,8 @@ decl_error! {
 		InVailAmount,
 		/// 群人数达到上限
 		MembersNumberToMax,
+		/// 未知的群类型
+		UnknownRoomType,
 }}
 
 
@@ -258,13 +264,18 @@ decl_module! {
 		#[weight = 10_000]
 		fn create_room(origin, max_members: GroupMaxMembers, group_type: Vec<u8>, join_cost: BalanceOf<T>) -> DispatchResult{
 			let who = ensure_signed(origin)?;
+
+			let create_cost = Self::create_cost();
+
 			let create_payment: Balance = match max_members.clone(){
-				GroupMaxMembers::Ten => 1 * DOLLARS,
-				GroupMaxMembers::Hundred => 10 * DOLLARS,
-				GroupMaxMembers::FiveHundred => 30 * DOLLARS,
-				GroupMaxMembers::TenThousand => 200 * DOLLARS,
-				GroupMaxMembers::NoLimit => 1000 * DOLLARS,
+				GroupMaxMembers::Ten => create_cost.Ten,
+				GroupMaxMembers::Hundred => create_cost.Hundred,
+				GroupMaxMembers::FiveHundred => create_cost.FiveHundred,
+				GroupMaxMembers::TenThousand => create_cost.TenThousand,
+				GroupMaxMembers::NoLimit => create_cost.NoLimit,
+				_ => return Err(Error::<T>::UnknownRoomType)?,
 			};
+
 			let create_payment = < BalanceOf<T> as TryFrom::<Balance>>::try_from(create_payment)
 			.map_err(|_| Error::<T>::CreatePaymentErr)?;
 
@@ -297,10 +308,9 @@ decl_module! {
 
 			<AllRoom<T>>::insert(group_id, group_info);
 
-			// 这个存储其实也没必要
 			<AllListeners<T>>::mutate(who.clone(), |h| h.rooms.push((group_id, RewardStatus::default())));
 
-			<ListenersOfRoom<T>>::insert(group_id, who.clone(), ListenerType::group_manager);
+			<ListenersOfRoom<T>>::mutate(group_id, |h| h.insert(who.clone()));
 
 			<GroupId>::mutate(|h| *h += 1);
 			Self::deposit_event(RawEvent::CreatedRoom(who, group_id));
@@ -338,20 +348,13 @@ decl_module! {
 				ensure!(payment_type.is_some(), Error::<T>::MustHavePaymentType);
 			}
 
+			let room_info = <AllRoom<T>>::get(group_id).ok_or(Error::<T>::RoomNotExists)?;
 
-
-			let room_info = <AllRoom<T>>::get(group_id);
-
-			// 判断群是否已经创建 不存在则退出
-			ensure!(room_info.is_some(), Error::<T>::RoomNotExists);
-
-			// 如果进群人数已经达到上限， 不能进群
-			let room_info = room_info.unwrap();
-
+ 			// 如果进群人数已经达到上限， 不能进群
 			ensure!(room_info.max_members.clone().into_u32()? >= room_info.now_members_number.clone(), Error::<T>::MembersNumberToMax);
 
 			// 如果自己已经在群里 不需要重新进
-			ensure!(!<ListenersOfRoom<T>>::contains_key(group_id, who.clone()), Error::<T>::InRoom);
+			ensure!(!(Self::is_in_room(group_id, who.clone())?), Error::<T>::InRoom);
 
 			Self::join_do(who.clone(), group_id, inviter.clone(), payment_type.clone())?;
 
@@ -367,11 +370,8 @@ decl_module! {
 
 			let props_cost = <PropsPayment<T>>::get();
 
-			// 该群必须存在
-			ensure!(<AllRoom<T>>::contains_key(group_id), Error::<T>::RoomNotExists);
-
 			// 自己在群里
-			ensure!(<ListenersOfRoom<T>>::contains_key(group_id, who.clone()), Error::<T>::NotInRoom);
+			ensure!(Self::is_in_room(group_id, who.clone())?, Error::<T>::NotInRoom);
 
 			// 计算道具总费用
 			let mut dollars = <BalanceOf<T>>::from(0u32);
@@ -422,11 +422,8 @@ decl_module! {
 		fn buy_audio_in_room(origin, group_id: u64, audio: Audio) -> DispatchResult{
 			let who = ensure_signed(origin)?;
 
-			// 该群必须存在
-			ensure!(<AllRoom<T>>::contains_key(group_id), Error::<T>::RoomNotExists);
-
 			// 自己在群里
-			ensure!(<ListenersOfRoom<T>>::contains_key(group_id, who.clone()), Error::<T>::NotInRoom);
+			ensure!(Self::is_in_room(group_id, who.clone())?, Error::<T>::NotInRoom);
 
 			let audio_cost = <AudioPayment<T>>::get();
 			// 计算道具总费用
@@ -479,14 +476,12 @@ decl_module! {
 		#[weight = 10_000]
 		fn kick_someone(origin, group_id: u64, who: T::AccountId) -> DispatchResult {
 			let manager = ensure_signed(origin)?;
-			// 这个群存在
-			ensure!(<AllRoom<T>>::contains_key(group_id), Error::<T>::RoomNotExists);
 
-			let mut room = <AllRoom<T>>::get(group_id).unwrap();
+			let mut room = <AllRoom<T>>::get(group_id).ok_or(Error::<T>::RoomNotExists)?;
 			// 是群主
 			ensure!(room.group_manager == manager.clone(), Error::<T>::NotManager);
 			// 这个人在群里
-			ensure!(<ListenersOfRoom<T>>::contains_key(group_id, who.clone()), Error::<T>::NotInRoom);
+			ensure!(Self::is_in_room(group_id, who.clone())?, Error::<T>::NotInRoom);
 
 			let now = Self::now();
 
@@ -529,10 +524,9 @@ decl_module! {
 			}
 
 			// 修改数据
+			<AllListeners<T>>::mutate(who.clone(), |h| h.rooms.retain(|x| x.0 != group_id.clone()));
 
-// 			<AllListeners<T>>::mutate(who.clone(), |h| h.rooms.retain(|x| x != &group_id));
-
-			<ListenersOfRoom<T>>::remove(group_id, who.clone());
+			<ListenersOfRoom<T>>::mutate(group_id, |h| h.remove(&who));
 
 			room.now_members_number = room.now_members_number.checked_sub(1u32).ok_or(Error::<T>::Overflow)?;
 
@@ -551,10 +545,8 @@ decl_module! {
 		#[weight = 10_000]
 		fn ask_for_disband_room(origin, group_id: u64) -> DispatchResult{
 			let who = ensure_signed(origin)?;
-			// 该群必须存在
-			ensure!(<AllRoom<T>>::contains_key(group_id), Error::<T>::RoomNotExists);
-			// 举报人必须是群里的成员
-			ensure!(<ListenersOfRoom<T>>::contains_key(group_id, who.clone()), Error::<T>::NotInRoom);
+			// 这个人是群成员
+			ensure!(Self::is_in_room(group_id, who.clone())?, Error::<T>::NotInRoom);
 
 			let mut room = <AllRoom<T>>::get(group_id).unwrap();
 
@@ -661,10 +653,8 @@ decl_module! {
 		#[weight = 10_000]
 		fn vote(origin, group_id: u64, vote: VoteType) -> DispatchResult{
 			let who = ensure_signed(origin)?;
-			// 该群必须存在
-			ensure!(<AllRoom<T>>::contains_key(group_id), Error::<T>::RoomNotExists);
-			// 举报人必须是群里的成员
-			ensure!(<ListenersOfRoom<T>>::contains_key(group_id, who.clone()), Error::<T>::NotInRoom);
+
+			ensure!(Self::is_in_room(group_id, who.clone())?, Error::<T>::NotInRoom);
 
 			let mut room = <AllRoom<T>>::get(group_id).unwrap();
 
@@ -804,11 +794,12 @@ decl_module! {
 
 								T::Create::on_unbalanced(T::Currency::deposit_creating(&who, reward));
 
-								// 删除数据
-								<ListenersOfRoom<T>>::remove(room.0.clone(), who.clone());
+								// 删除个人
+								<ListenersOfRoom<T>>::mutate(room.0.clone(), |h| h.remove(&who));
 
+								// 如果是所有人已经完成 那么就清除
 								if info.already_get_count.clone() == info.total_person.clone(){
-									<ListenersOfRoom<T>>::remove(room.0.clone(), who.clone());
+									<ListenersOfRoom<T>>::remove(room.0.clone());
 								}
 
 								is_get = true;
@@ -846,10 +837,8 @@ decl_module! {
 		#[weight = 10_000]
 		pub fn send_redpacket_in_room(origin, group_id: u64, lucky_man_number: u32, amount: BalanceOf<T>) -> DispatchResult{
 			let who = ensure_signed(origin)?;
-			// 判断群是否已经创建 不存在则退出
-			ensure!(<AllRoom<T>>::contains_key(group_id), Error::<T>::RoomNotExists);
-			// 自己要在群里
-			ensure!(<ListenersOfRoom<T>>::contains_key(group_id, who.clone()), Error::<T>::NotInRoom);
+
+			ensure!(Self::is_in_room(group_id, who.clone())?, Error::<T>::NotInRoom);
 
 			// 金额太小不能发红包
 			ensure!(amount >= <BalanceOf<T>>::from(lucky_man_number).checked_mul(&T::RedPacketMinAmount::get()).ok_or(Error::<T>::Overflow)?, Error::<T>::AmountTooLow);
@@ -891,15 +880,14 @@ decl_module! {
 
 			let who = lucky_man;
 
-			// 判断群是否已经创建 不存在则退出
-			ensure!(<AllRoom<T>>::contains_key(group_id), Error::<T>::RoomNotExists);
 			// 自己要在群里
-			ensure!(<ListenersOfRoom<T>>::contains_key(group_id, who.clone()), Error::<T>::NotInRoom);
+			ensure!(Self::is_in_room(group_id, who.clone())?, Error::<T>::NotInRoom);
+
 			// 红包存在
 			ensure!(<RedPacketOfRoom<T>>::contains_key(group_id, redpacket_id), Error::<T>::RedPacketNotExists);
+
 			// 领取的金额足够大
 //			ensure!(amount >= T::RedPacketMinAmount::get(), Error::<T>::AmountTooLow);
-
 
 			let mut redpacket = <RedPacketOfRoom<T>>::get(group_id, redpacket_id);
 
@@ -988,7 +976,7 @@ impl <T: Trait> Module <T> {
 
 			}
 
-			Self::remove_and_add_info(you.clone(), group_id, true)
+			Self::add_info(you.clone(), group_id)
 
 		}
 
@@ -1000,7 +988,7 @@ impl <T: Trait> Module <T> {
 				Self::pay_for(group_id, join_cost);
 
 			}
-			Self::remove_and_add_info(you.clone(), group_id, false)
+			Self::add_info(you.clone(), group_id)
 
 			}
 
@@ -1036,13 +1024,11 @@ impl <T: Trait> Module <T> {
 	}
 
 
-	// 进群的最后一步 添加与删除数据
-	fn remove_and_add_info(yourself: T::AccountId, group_id: u64, is_invited: bool){
-
-		let mut listener_type = ListenerType::default();
+	// 进群的最后一步 添加数据
+	fn add_info(yourself: T::AccountId, group_id: u64){
 
 		// 添加信息
-		<ListenersOfRoom<T>>::insert(group_id, yourself.clone(), listener_type);
+		<ListenersOfRoom<T>>::mutate(group_id, |h| h.insert(yourself.clone()));
 
 		<AllListeners<T>>::mutate(yourself.clone(), |h| h.rooms.push((group_id, RewardStatus::default())));
 
@@ -1142,6 +1128,24 @@ impl <T: Trait> Module <T> {
 	}
 
 
+	/// 判断人是否在群里
+	fn is_in_room(group_id: u64, who: T::AccountId) -> result::Result<bool, DispatchError> {
+		let _ = <AllRoom<T>>::get(group_id).ok_or(Error::<T>::RoomNotExists)?;
+		let listeners = <ListenersOfRoom<T>>::get(group_id);
+
+		if listeners.clone().len() == 0 {
+			return Err(Error::<T>::RoomEmpty)?;
+		}
+
+		if listeners.contains(&who) {
+			Ok(true)
+		}
+		else {
+			Ok(false)
+		}
+	}
+
+
 	// 删除过期的解散群产生的信息
 	fn remove_expire_disband_info() {
 		let session_indexs = <AllSessionIndex>::get();
@@ -1158,7 +1162,7 @@ impl <T: Trait> Module <T> {
 				for i in info.iter(){
 					let group_id = i.0;
 					// 删除掉房间剩余记录
-					<ListenersOfRoom<T>>::remove_prefix(group_id);
+					<ListenersOfRoom<T>>::remove(group_id);
 
 					let disband_room_info = <InfoOfDisbandRoom<T>>::get(index, group_id);
 					// 获取剩余的没有领取的金额
