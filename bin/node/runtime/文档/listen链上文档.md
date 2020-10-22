@@ -43,8 +43,9 @@
 	* 参数：
 		- group_id： 房间号
 		- invite: 被邀请人
+		- inviter: 邀请人
 		- payment_type: 付费类型(邀请人付费或是被邀请人付费)(可以为空值)
-		>>> 说明： 被邀请人如果是自己，则说明是自己进群；如果被邀请人是别人，说明自己邀请别人，这时候必须指定付费类型
+		>>> 说明： 如果有邀请人，邀请人不能是自己，付费类型也不能为空；没有邀请人，说明是自己进群。
 	* 逻辑：
 		- 签名
 		- 房间存在
@@ -184,6 +185,14 @@
     * 代码: `fn set_disband_interval(origin, time: DisbandTime<T::BlockNumber>)`
     * 参数： time(一个结构体， 包含每种房间类型多长间隔)
     * 逻辑： root权限
+***
+18. 设置创建群需要的费用
+    * 代码： `fn set_create_cost(origin, max_members: GroupMaxMembers, amount: Balance) `
+    * 参数：
+        * max_members： 群上限人数（也是群类型)
+        * amount: 金额
+    * 逻辑：
+        * 公投
 ***
 ## 主要数据结构
 ```bazaar
