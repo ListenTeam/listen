@@ -292,6 +292,7 @@ decl_module! {
 			ensure!(!other_signatories.is_empty(), Error::<T>::TooFewSignatories);
 			let other_signatories_len = other_signatories.len();
 			ensure!(other_signatories_len < max_sigs, Error::<T>::TooManySignatories);
+
 			// 自己的账号在多签名单里
 			let signatories = Self::ensure_sorted_and_insert(other_signatories, who.clone())?;
 

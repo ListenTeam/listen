@@ -130,6 +130,10 @@ decl_storage! {
 decl_error! {
 	/// Error for the elections module.
 	pub enum Error for Module<T: Trait> {
+		/// 队列为空（没有人)
+		VecEmpty,
+		/// 阀值错误
+		ThreshouldErr,
 		/// 已经空投过
 		AlreadyAirDrop,
 		/// 创建群支付金额错误
@@ -198,6 +202,8 @@ decl_error! {
 		MembersNumberToMax,
 		/// 未知的群类型
 		UnknownRoomType,
+		/// 成员重复
+		MemberDuplicate,
 }}
 
 
@@ -223,6 +229,13 @@ decl_module! {
 		/// 设置用于空投的多签
 		#[weight = 10_000]
 		fn set_multisig(origin, who: Vec<T::AccountId>, threshould: u16){
+
+			ensure_root(origin)?;
+
+			let who = Self::sort_account_id(who)?;
+
+			ensure!(threshould > 0u16 && threshould <= who.clone().len() as u16, Error::<T>::ThreshouldErr);
+
 			let multisig_id = <pallet_multisig::Module<T>>::multi_account_id(&who, threshould.clone());
 			<Multisig<T>>::put((who, threshould, multisig_id));
 
@@ -340,20 +353,20 @@ decl_module! {
 
 		/// 进群
 		#[weight = 10_000]
-		fn into_room(origin, group_id: u64, invite: T::AccountId,  payment_type: Option<InvitePaymentType>) -> DispatchResult{
+		fn into_room(origin, group_id: u64, invite: T::AccountId, inviter: Option<T::AccountId>, payment_type: Option<InvitePaymentType>) -> DispatchResult{
 			let who = ensure_signed(origin)?;
 
-			// 如果不是自己邀请自己， 则自己是单独进群
-			let mut inviter: Option<T::AccountId>;
+			/// 获取多签账号id
+			let (_, _, multisig_id) = <Multisig<T>>::get().ok_or(Error::<T>::MultisigIdIsNone)?;
 
-			if who.clone() != invite.clone() {
-				inviter = Some(who.clone());
-				// 如果邀请别人 必须有付费类型
+			/// 是多签账号才给执行
+			ensure!(who.clone() == multisig_id.clone(), Error::<T>::NotMultisigId);
+
+			if inviter.is_some() {
+				// 被邀请人与邀请人不能相同
+				ensure!(inviter.clone().unwrap() != invite.clone(), Error::<T>::IsYourSelf);
+				// 邀请别人必须要选择付费类型
 				ensure!(payment_type.is_some(), Error::<T>::MustHavePaymentType);
-			}
-			else{
-				inviter = None;
-
 			}
 
 			let room_info = <AllRoom<T>>::get(group_id).ok_or(Error::<T>::RoomNotExists)?;
@@ -366,7 +379,7 @@ decl_module! {
 
 			Self::join_do(invite.clone(), group_id, inviter.clone(), payment_type.clone())?;
 
-			Self::deposit_event(RawEvent::IntoRoom(who, group_id));
+			Self::deposit_event(RawEvent::IntoRoom(invite, inviter, group_id));
 			Ok(())
 		}
 
@@ -1173,6 +1186,38 @@ impl <T: Trait> Module <T> {
 	}
 
 
+	/// 排序队列里的account_id
+	fn sort_account_id(who: Vec<T::AccountId>) -> result::Result<Vec<T::AccountId>, DispatchError> {
+
+		ensure!(who.clone().len() > 0 as usize, Error::<T>::VecEmpty);
+
+		let mut new_who = vec![];
+
+		let who_cp = who.clone();
+
+		for i in who_cp.iter() {
+			// 第一个数直接插入
+			if new_who.len() == 0 as usize {
+				new_who.insert(0, i.clone());
+			}
+
+			else{
+				let mut index = 0;
+
+				for j in new_who.iter() {
+					if i >= j {
+						ensure!(i != j, Error::<T>::MemberDuplicate);
+						index += 1;
+					}
+				}
+				new_who.insert(index, i.clone());
+			}
+		}
+
+		Ok(new_who)
+	}
+
+
 	// 删除过期的解散群产生的信息
 	fn remove_expire_disband_info() {
 		let session_indexs = <AllSessionIndex>::get();
@@ -1231,7 +1276,7 @@ decl_event!(
 	 AirDroped(AccountId, AccountId),
 	 CreatedRoom(AccountId, u64),
 	 Invited(AccountId, AccountId),
-	 IntoRoom(AccountId, u64),
+	 IntoRoom(AccountId, Option<AccountId>, u64),
 	 RejectedInvite(AccountId, u64),
 	 ChangedPermission(AccountId, u64),
 	 BuyProps(AccountId),
