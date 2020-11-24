@@ -396,18 +396,23 @@ decl_module! {
 
 			// 计算道具总费用
 			let mut dollars = <BalanceOf<T>>::from(0u32);
-			if props.picture > 032{
+			if props.picture > 0u32{
 				dollars = props_cost.picture * <BalanceOf<T>>::from(props.picture);
+				debug::info!("图片费用为： {:?}", props_cost.picture * <BalanceOf<T>>::from(props.picture));
 			}
-			if props.text > 032{
+
+			if props.text > 0u32{
 				dollars += props_cost.text * <BalanceOf<T>>::from(props.text);
+				debug::info!("文本费用为： {:?}", props_cost.text * <BalanceOf<T>>::from(props.text));
 			}
-			if props.video > 032{
+			if props.video > 0u32{
 				dollars += props_cost.video * <BalanceOf<T>>::from(props.video);
+				debug::info!("视频费用为： {:?}", props_cost.video * <BalanceOf<T>>::from(props.video));
 			}
 
 			// 把U128转换成balance
 			let cost = dollars;
+			debug::info!("道具总费用为： {:?}", cost);
 			// ********以上数据不需要额外处理 不可能出现panic*************
 
 			// 扣除费用
@@ -421,14 +426,19 @@ decl_module! {
 
 			room.total_balances += cost.clone();
 
+			debug::info!("更新后的房间信息是：{:?}", room.clone());
+
 			<AllRoom<T>>::insert(group_id, room);
 
 			// 修改个人信息
 			let mut person = <AllListeners<T>>::get(who.clone());
+			debug::info!("更新前的个人信息是: {:?}", person.clone());
 			person.props.picture = person.props.picture.checked_add(props.picture).ok_or(Error::<T>::Overflow)?;
 			person.props.text = person.props.text.checked_add(props.text).ok_or(Error::<T>::Overflow)?;
 			person.props.video = person.props.video.checked_add(props.video).ok_or(Error::<T>::Overflow)?;
 			person.cost += cost.clone();
+
+			debug::info!("更新后的个人信息是: {:?}", person.clone());
 
 			<AllListeners<T>>::insert(who.clone(), person);
 
@@ -449,14 +459,14 @@ decl_module! {
 			let audio_cost = <AudioPayment<T>>::get();
 			// 计算道具总费用
 			let mut dollars = <BalanceOf<T>>::from(0u32);
-			if audio.ten_seconds > 032{
+			if audio.ten_seconds > 0u32{
 				dollars = audio_cost.ten_seconds * <BalanceOf<T>>::from(audio.ten_seconds);
 			}
-			if audio.thirty_seconds > 032{
+			if audio.thirty_seconds > 0u32{
 				dollars += audio_cost.thirty_seconds * <BalanceOf<T>>::from(audio.thirty_seconds);
 			}
 
-			if audio.minutes > 032{
+			if audio.minutes > 0u32{
 				dollars += audio_cost.minutes * <BalanceOf<T>>::from(audio.minutes);
 			}
 
