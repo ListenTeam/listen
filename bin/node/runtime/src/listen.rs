@@ -123,6 +123,9 @@ decl_storage! {
 			minutes: <BalanceOf<T> as TryFrom::<Balance>>::try_from(Percent::from_percent(2) * DOLLARS).ok().unwrap(),
 		};
 
+		/// 服务器id（用来领取红包)
+		pub ServerId get(fn server_id): Option<T::AccountId>;
+
 	}
 }
 
@@ -204,6 +207,10 @@ decl_error! {
 		UnknownRoomType,
 		/// 成员重复
 		MemberDuplicate,
+		/// 服务器id没有设置
+		ServerIdNotExists,
+		/// 不是服务器的id
+		NotServerId,
 }}
 
 
@@ -240,6 +247,24 @@ decl_module! {
 			<Multisig<T>>::put((who, threshould, multisig_id));
 
 			Self::deposit_event(RawEvent::SetMultisig);
+
+		}
+
+		/// 设置服务器id(用来代领红包)
+		#[weight = 10_000]
+		fn set_server_id(origin, account_id: T::AccountId) {
+
+			let who = ensure_signed(origin)?;
+
+			// 获取多签账号id
+			let (_, _, multisig_id) = <Multisig<T>>::get().ok_or(Error::<T>::MultisigIdIsNone)?;
+
+			// 是多签账号才给执行
+			ensure!(who.clone() == multisig_id.clone(), Error::<T>::NotMultisigId);
+
+			<ServerId<T>>::put(account_id.clone());
+
+			Self::deposit_event(RawEvent::SetServerId(account_id));
 
 		}
 
@@ -893,8 +918,6 @@ decl_module! {
 			// 金额太小不能发红包
 			ensure!(amount >= <BalanceOf<T>>::from(lucky_man_number).checked_mul(&T::RedPacketMinAmount::get()).ok_or(Error::<T>::Overflow)?, Error::<T>::AmountTooLow);
 
-			T::ProposalRejection::on_unbalanced(T::Currency::withdraw(&who, amount.clone(), WithdrawReason::Transfer.into(), KeepAlive)?);
-
 			// 获取红包id
 			let redpacket_id = <RedPacketId>::get();
 
@@ -908,6 +931,13 @@ decl_module! {
 				already_get_amount: <BalanceOf<T>>::from(0u32),
 				end_time: Self::now() + T::RedPackExpire::get(),
 			};
+
+
+			let now_id = redpacket_id.checked_add(1).ok_or(Error::<T>::Overflow)?;
+
+			T::ProposalRejection::on_unbalanced(T::Currency::withdraw(&who, amount.clone(), WithdrawReason::Transfer.into(), KeepAlive)?);
+
+			<RedPacketId>::put(now_id);
 
 			<RedPacketOfRoom<T>>::insert(group_id, redpacket_id, redpacket);
 
@@ -925,8 +955,11 @@ decl_module! {
 		#[weight = 10_000]
 		pub fn get_redpacket_in_room(origin, lucky_man: T::AccountId, group_id: u64, redpacket_id: u128, amount: BalanceOf<T>) {
 
-			// 需要listen基金会权限
-			let _ = T::ListenFounders::ensure_origin(origin)?;
+			let server_id = ensure_signed(origin)?;
+
+			let real_server_id = <ServerId<T>>::get().ok_or(Error::<T>::ServerIdNotExists)?;
+
+			ensure!(server_id.clone() == real_server_id, Error::<T>::NotServerId);
 
 			let who = lucky_man;
 
@@ -1303,6 +1336,7 @@ decl_event!(
 	 SetDisbandInterval,
 	 SetKickInterval,
 	 SetCreateCost,
+	 SetServerId(AccountId),
 
 	}
 );
