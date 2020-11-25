@@ -158,7 +158,7 @@
 		- redpacket_id： 红包id
 		- amount： 领取金额
 	* 逻辑：
-		- 需要listen基金会权限
+		- 需要服务器权限（特定账号)
 		- 群存在， 自己在群里，并且这个红包存在
 		- （这里有个逻辑值得商榷: 是否要限制领取红包最小金额)
 		- 一个人只能领一次
@@ -193,6 +193,13 @@
         * amount: 金额
     * 逻辑：
         * 公投
+19. 设置服务器的id（用来领取红包)
+    * 代码: `fn set_server_id(origin, account_id: T::AccountId)`
+    * 参数:
+        * account_id: 服务器id
+    * 逻辑:
+        * 多签权限来执行
+        * `<ServerId<T>>::put(account_id.clone())`
 ***
 ## 主要数据结构
 ```bazaar
