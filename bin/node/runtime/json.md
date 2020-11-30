@@ -1,5 +1,7 @@
 ```
 {
+  "Address": "IndicesLookupSource",
+   "LookupSource": "IndicesLookupSource",
   "Amount": "Balance",
   "AllProps": {
     "picture": "u32",
