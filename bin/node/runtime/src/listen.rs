@@ -278,10 +278,10 @@ decl_module! {
 			let who = ensure_signed(origin)?;
 
 			/// 获取多签账号id
-// 			let (_, _, multisig_id) = <Multisig<T>>::get().ok_or(Error::<T>::MultisigIdIsNone)?;
+			let (_, _, multisig_id) = <Multisig<T>>::get().ok_or(Error::<T>::MultisigIdIsNone)?;
 
 			// 是多签账号才给执行
-// 			ensure!(who.clone() == multisig_id.clone(), Error::<T>::NotMultisigId);
+			ensure!(who.clone() == multisig_id.clone(), Error::<T>::NotMultisigId);
 
 			// 已经空投过的不能再操作
 			ensure!(!<AlreadyAirDropList<T>>::get().contains(&des), Error::<T>::AlreadyAirDrop);
