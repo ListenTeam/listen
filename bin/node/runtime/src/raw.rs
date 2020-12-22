@@ -219,7 +219,7 @@ pub struct GroupInfo<AccountId, Balance, AllProps, Audio, BlockNumber, GroupMaxM
 
 	pub now_members_number: u32, // 目前群人数
 
-	pub last_kick_hight: BlockNumber,  // 群主上次踢人的高度
+	pub last_remove_height: BlockNumber,  // 群主上次踢人的高度
 	pub last_disband_end_hight: BlockNumber,  // 上次解散群提议结束时的高度
 
 	pub disband_vote: DisbandVote, // 投票信息

@@ -93,7 +93,7 @@ decl_storage! {
 		pub Multisig get(fn multisig): Option<(Vec<T::AccountId>, u16, T::AccountId)>;
 
 		/// 踢人的时间限制
-		pub KickTimeLimit get(fn kick_time_limit): KickTime<T::BlockNumber> = KickTime{
+		pub RemoveInterval get(fn kick_time_limit): KickTime<T::BlockNumber> = KickTime{
 			Ten: T::BlockNumber::from(kick::Ten),
 			Hundred: T::BlockNumber::from(kick::Hundred),
 			FiveHundred: T::BlockNumber::from(kick::FiveHundred),
@@ -102,7 +102,7 @@ decl_storage! {
 		};
 
 		/// 解散群的时间限制
-		pub DisbandTimeLimit get(fn disband_time_limit): DisbandTime<T::BlockNumber> = DisbandTime{
+		pub DisbandInterval get(fn disband_time_limit): DisbandTime<T::BlockNumber> = DisbandTime{
 			Ten: T::BlockNumber::from(disband::Ten),
 			Hundred: T::BlockNumber::from(disband::Hundred),
 			FiveHundred: T::BlockNumber::from(disband::FiveHundred),
@@ -272,7 +272,7 @@ decl_module! {
 
 		/// 空投
 		#[weight = 10_000]
-		fn air_drop(origin, des: T::AccountId) -> DispatchResult{
+		fn air_drop(origin, des: T::AccountId) -> DispatchResult {
 
 			// 执行空投的账号
 			let who = ensure_signed(origin)?;
@@ -296,6 +296,7 @@ decl_module! {
 			<system::Module<T>>::inc_ref(&des);
 			Self::deposit_event(RawEvent::AirDroped(who, des));
 			Ok(())
+
 		}
 
 
@@ -336,7 +337,7 @@ decl_module! {
 				total_balances: <BalanceOf<T>>::from(0u32),
 				group_manager_balances: <BalanceOf<T>>::from(0u32),
 				now_members_number: 1u32,
-				last_kick_hight: T::BlockNumber::default(),
+				last_remove_height: T::BlockNumber::default(),
 				last_disband_end_hight: T::BlockNumber::default(),
 				disband_vote: DisbandVote::default(),
 				this_disband_start_time: T::BlockNumber::default(),
@@ -360,7 +361,7 @@ decl_module! {
 
 		/// 群主修改进群的费用
 		#[weight = 10_000]
-		fn modify_join_cost(origin, group_id: u64, join_cost: BalanceOf<T>) -> DispatchResult{
+		fn update_join_cost(origin, group_id: u64, join_cost: BalanceOf<T>) -> DispatchResult{
 			let who = ensure_signed(origin)?;
 			let room_info = <AllRoom<T>>::get(group_id);
 			// 群存在
@@ -550,7 +551,7 @@ decl_module! {
 
 		/// 群主踢人
 		#[weight = 10_000]
-		fn kick_someone(origin, group_id: u64, who: T::AccountId) -> DispatchResult {
+		fn remove_someone(origin, group_id: u64, who: T::AccountId) -> DispatchResult {
 			let manager = ensure_signed(origin)?;
 
 			let mut room = <AllRoom<T>>::get(group_id).ok_or(Error::<T>::RoomNotExists)?;
@@ -561,8 +562,8 @@ decl_module! {
 
 			let now = Self::now();
 
-			if room.last_kick_hight > T::BlockNumber::from(0u32){
-				let until = now - room.last_kick_hight;
+			if room.last_remove_height > T::BlockNumber::from(0u32){
+				let until = now - room.last_remove_height;
 
 				match room.max_members	{
 				GroupMaxMembers::Ten => {
@@ -606,7 +607,7 @@ decl_module! {
 
 			room.now_members_number = room.now_members_number.checked_sub(1u32).ok_or(Error::<T>::Overflow)?;
 
-			room.last_kick_hight = now;
+			room.last_remove_height = now;
 
 			<AllRoom<T>>::insert(group_id, room);
 
@@ -709,9 +710,9 @@ decl_module! {
 
 		/// 设置群主踢人的时间间隔
 		#[weight = 10_000]
-		fn set_kick_interval(origin, time: KickTime<T::BlockNumber>){
+		fn set_remove_interval(origin, time: KickTime<T::BlockNumber>){
 			ensure_root(origin)?;
-			<KickTimeLimit<T>>::put(time);
+			<RemoveInterval<T>>::put(time);
 			Self::deposit_event(RawEvent::SetKickInterval);
 		}
 
@@ -720,7 +721,7 @@ decl_module! {
 		#[weight = 10_000]
 		fn set_disband_interval(origin, time: DisbandTime<T::BlockNumber>){
 			ensure_root(origin)?;
-			<DisbandTimeLimit<T>>::put(time);
+			<DisbandInterval<T>>::put(time);
 			Self::deposit_event(RawEvent::SetDisbandInterval);
 		}
 
