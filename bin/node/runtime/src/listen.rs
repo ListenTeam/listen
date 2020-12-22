@@ -11,6 +11,7 @@ use sp_runtime::{DispatchResult, Percent, RuntimeDebug, traits::CheckedMul, Disp
 use pallet_timestamp as timestamp;
 use node_primitives::{Balance, AccountId};
 use crate::constants::{currency::*, time::*};
+use sp_runtime::SaturatedConversion;
 // use sp_io::hashing::blake2_256;
 
 use pallet_treasury as treasury;
@@ -73,7 +74,7 @@ decl_storage! {
 		pub AllRoom get(fn all_room): map hasher(blake2_128_concat) u64 => Option<GroupInfo<T::AccountId, BalanceOf<T>,
 		AllProps, Audio, T::BlockNumber, GroupMaxMembers, DisbandVote<BTreeSet<T::AccountId>>, T::Moment>>;
 
-		///群里的所有人
+		/// 群里的所有人
 		pub ListenersOfRoom get(fn listeners_of_room): map hasher(blake2_128_concat) u64 => BTreeSet<T::AccountId>;
 
 		/// 所有人员的信息(购买道具, 购买语音, 以及加入的群)
@@ -793,6 +794,7 @@ decl_module! {
 					let manager_reward = room.group_manager_balances.clone();
 					// 把属于群主的那部分给群主
 					T::Create::on_unbalanced(T::Currency::deposit_creating(&room.group_manager, manager_reward));
+
 					let listener_reward = total_reward.clone() - manager_reward.clone();
 					let session_index = Self::get_session_index();
 					let per_man_reward = listener_reward.clone() / <BalanceOf<T>>::from(room.now_members_number);
@@ -949,6 +951,74 @@ decl_module! {
 			Self::deposit_event(RawEvent::SendRedPocket(group_id, redpacket_id, amount.clone()));
 
 			Ok(())
+
+		}
+
+
+		/// 退群
+		#[weight = 10_000]
+		fn exit(origin, group_id: u64) {
+
+			let user = ensure_signed(origin)?;
+
+			// 自己要在群里
+			ensure!(Self::is_in_room(group_id, user.clone())?, Error::<T>::NotInRoom);
+
+			// 获取群资产
+			let mut room = <AllRoom<T>>::get(group_id).unwrap();
+
+			let number = room.now_members_number;
+
+			// 获取群员资产
+			let user_amount = room.total_balances - room.group_manager_balances;
+
+			if number != 1 {
+
+				let amount = user_amount / room.now_members_number.saturated_into::<BalanceOf<T>>() / 4.saturated_into::<BalanceOf<T>>();
+
+				T::Create::on_unbalanced(T::Currency::deposit_creating(&user, amount));
+
+				room.now_members_number -= 1;
+				room.total_balances -= amount;
+				room.group_manager_balances -= amount;
+
+				let mut listeners = <ListenersOfRoom<T>>::get(group_id);
+
+				if room.group_manager == user {
+
+					if let Some(new_manager) = listeners.clone().pop_first() {
+
+						room.group_manager = new_manager.clone();
+
+						listeners.insert(&new_manager);
+
+
+					}
+				}
+
+				<AllRoom<T>>::insert(group_id, room);
+
+				<ListenersOfRoom<T>>::insert(group_id, listeners);
+
+			}
+
+			else {
+
+				let amount = user_amount;
+
+				T::Create::on_unbalanced(T::Currency::deposit_creating(&user, amount));
+
+				let listeners = <ListenersOfRoom<T>>::get(group_id);
+
+				<AllRoom<T>>::remove(group_id);
+
+				<ListenersOfRoom<T>>::remove(group_id);
+
+			}
+
+			// todo 处理房间红包
+
+			Self::deposit_event(RawEvent::Exit(user, group_id));
 
 		}
 
@@ -1339,6 +1409,7 @@ decl_event!(
 	 SetKickInterval,
 	 SetCreateCost,
 	 SetServerId(AccountId),
+	 Exit(AccountId, u64),
 
 	}
 );
