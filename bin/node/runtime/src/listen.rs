@@ -20,7 +20,7 @@ use vote::*;
 // use hex_literal::hex;
 use listen_time::*;
 
-use crate::raw::{KickTime, DisbandTime, listen_time, PropsCost, AudioCost, AllProps, RoomRewardInfo,
+use crate::raw::{RemoveTime, DisbandTime, listen_time, PropsCost, AudioCost, AllProps, RoomRewardInfo,
 Audio, DisbandVote, RedPacket, GroupMaxMembers, VoteType, RewardStatus, InvitePaymentType, GroupInfo,
 PersonInfo, vote, ListenerType, SessionIndex, RoomId, CreateCost};
 
@@ -94,7 +94,7 @@ decl_storage! {
 		pub Multisig get(fn multisig): Option<(Vec<T::AccountId>, u16, T::AccountId)>;
 
 		/// 踢人的时间限制
-		pub RemoveInterval get(fn kick_time_limit): KickTime<T::BlockNumber> = KickTime{
+		pub RemoveInterval get(fn kick_time_limit): RemoveTime<T::BlockNumber> = RemoveTime{
 			Ten: T::BlockNumber::from(remove::Ten),
 			Hundred: T::BlockNumber::from(remove::Hundred),
 			FiveHundred: T::BlockNumber::from(remove::FiveHundred),
@@ -711,7 +711,7 @@ decl_module! {
 
 		/// 设置群主踢人的时间间隔
 		#[weight = 10_000]
-		fn set_remove_interval(origin, time: KickTime<T::BlockNumber>){
+		fn set_remove_interval(origin, time: RemoveTime<T::BlockNumber>){
 			ensure_root(origin)?;
 			<RemoveInterval<T>>::put(time);
 			Self::deposit_event(RawEvent::SetKickInterval);
@@ -985,17 +985,20 @@ decl_module! {
 
 				let mut listeners = <ListenersOfRoom<T>>::get(group_id);
 
-				let listeners_cp = listeners.clone();
-
 				// 如果退出的是群主 则换群主
 				if room.clone().group_manager == user {
+
+					let _ = listeners.take(&room.group_manager);
+
+					let listeners_cp = listeners.clone();
 
 					if let Some(manager) = listeners_cp.clone().iter().last() {
 
 						let new_manager = listeners.take(&manager).unwrap();
 
-						room.group_manager = new_manager;
+						room.group_manager = new_manager.clone();
 
+						listeners.insert(room.group_manager.clone());
 
 					}
 				}
@@ -1010,7 +1013,7 @@ decl_module! {
 			// 如果退完没有人 则解散
 			else {
 
-				let amount = user_amount;
+				let amount = room.total_balances;
 
 				T::Create::on_unbalanced(T::Currency::deposit_creating(&user, amount));
 

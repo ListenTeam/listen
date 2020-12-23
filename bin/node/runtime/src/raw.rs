@@ -5,15 +5,6 @@ use sp_std::{result, prelude::*};
 pub type SessionIndex = u32;
 pub type RoomId = u64;
 
-/// 群主踢人的时间限制
-#[derive(PartialEq, Encode, Decode, Default, RuntimeDebug, Clone)]
-pub struct KickTime<BlockNumber>{
-	pub Ten: BlockNumber,
-	pub Hundred: BlockNumber,
-	pub FiveHundred: BlockNumber,
-	pub TenThousand: BlockNumber,
-	pub NoLimit: BlockNumber,
-}
 
 use node_primitives::Balance;
 use crate::constants::currency::*;
@@ -50,6 +41,17 @@ pub struct DisbandTime<BlockNumber>{
 }
 
 
+#[derive(PartialEq, Encode, Decode, Default, RuntimeDebug, Clone)]
+pub struct RemoveTime<BlockNumber>{
+	pub Ten: BlockNumber,
+	pub Hundred: BlockNumber,
+	pub FiveHundred: BlockNumber,
+	pub TenThousand: BlockNumber,
+	pub NoLimit: BlockNumber,
+}
+
+
+
 /// 道具的费用
 #[derive(PartialEq, Encode, Decode, Default, RuntimeDebug, Clone)]
 pub struct PropsCost<BalanceOf>{
@@ -80,8 +82,8 @@ pub struct AllProps{
 /// 群的奖励信息
 #[derive(PartialEq, Encode, Decode, Default, RuntimeDebug, Clone)]
 pub struct RoomRewardInfo<Balance>{
-	pub total_person: u32, // 红包开始设定的人数
-	pub already_get_count: u32, // 已经获取的人数
+	pub total_person: u32,
+	pub already_get_count: u32,
 	pub total_reward: Balance,  // 总奖励
 	pub already_get_reward: Balance, // 已经领取的奖励
 	pub per_man_reward: Balance,  // 平均每个人的奖励
@@ -92,9 +94,11 @@ pub struct RoomRewardInfo<Balance>{
 /// 解散投票
 #[derive(PartialEq, Encode, Decode, Default, RuntimeDebug, Clone)]
 pub struct DisbandVote<BTreeSet>{
-	pub approve_man: BTreeSet, // 赞成的人员名单
-	pub reject_man: BTreeSet, // 拒绝的人员名单
+	pub approve_man: BTreeSet,
+	pub reject_man: BTreeSet,
 }
+
+
 
 
 /// 红包
@@ -226,7 +230,7 @@ pub struct GroupInfo<AccountId, Balance, AllProps, Audio, BlockNumber, GroupMaxM
 	pub this_disband_start_time: BlockNumber, // 解散议案开始投票的时间
 
 	pub is_voting: bool,  // 是否出于投票状态
-	pub create_time: Moment, // 群创建的时间
+	pub create_time: Moment,
 
 }
 
@@ -258,7 +262,7 @@ impl Default for ListenerType{
 pub mod listen_time{
 
 	// 踢人的时间限制
-	pub mod remove{
+	pub mod remove {
 		use node_primitives::BlockNumber;
 		use crate::constants::time::*;
 		pub const Ten: BlockNumber = 7 * DAYS;
