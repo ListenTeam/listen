@@ -95,11 +95,11 @@ decl_storage! {
 
 		/// 踢人的时间限制
 		pub RemoveInterval get(fn kick_time_limit): KickTime<T::BlockNumber> = KickTime{
-			Ten: T::BlockNumber::from(kick::Ten),
-			Hundred: T::BlockNumber::from(kick::Hundred),
-			FiveHundred: T::BlockNumber::from(kick::FiveHundred),
-			TenThousand: T::BlockNumber::from(kick::TenThousand),
-			NoLimit: T::BlockNumber::from(kick::NoLimit),
+			Ten: T::BlockNumber::from(remove::Ten),
+			Hundred: T::BlockNumber::from(remove::Hundred),
+			FiveHundred: T::BlockNumber::from(remove::FiveHundred),
+			TenThousand: T::BlockNumber::from(remove::TenThousand),
+			NoLimit: T::BlockNumber::from(remove::NoLimit),
 		};
 
 		/// 解散群的时间限制
@@ -170,7 +170,7 @@ decl_error! {
 		/// 权限错误
 		PermissionErr,
 		/// 没有到踢人的时间
-		NotUntilKickTime,
+		NotRemoveTime,
 		/// 正在投票
 		IsVoting,
 		/// 没有在投票
@@ -568,32 +568,32 @@ decl_module! {
 
 				match room.max_members	{
 				GroupMaxMembers::Ten => {
-					if until <= T::BlockNumber::from(kick::Ten){
-						return Err(Error::<T>::NotUntilKickTime)?;
+					if until <= T::BlockNumber::from(remove::Ten){
+						return Err(Error::<T>::NotRemoveTime)?;
 					}
 
 				},
 				GroupMaxMembers::Hundred => {
-					if until <= T::BlockNumber::from(kick::Hundred){
-						return Err(Error::<T>::NotUntilKickTime)?;
+					if until <= T::BlockNumber::from(remove::Hundred){
+						return Err(Error::<T>::NotRemoveTime)?;
 					}
 
 				},
 				GroupMaxMembers::FiveHundred => {
-					if until <= T::BlockNumber::from(kick::FiveHundred){
-						return Err(Error::<T>::NotUntilKickTime)?;
+					if until <= T::BlockNumber::from(remove::FiveHundred){
+						return Err(Error::<T>::NotRemoveTime)?;
 					}
 
 				},
 				GroupMaxMembers::TenThousand => {
-					if until <= T::BlockNumber::from(kick::TenThousand){
-						return Err(Error::<T>::NotUntilKickTime)?;
+					if until <= T::BlockNumber::from(remove::TenThousand){
+						return Err(Error::<T>::NotRemoveTime)?;
 					}
 
 				},
 				GroupMaxMembers::NoLimit => {
-					if until <= T::BlockNumber::from(kick::NoLimit){
-						return Err(Error::<T>::NotUntilKickTime)?;
+					if until <= T::BlockNumber::from(remove::NoLimit){
+						return Err(Error::<T>::NotRemoveTime)?;
 					}
 				}
 
@@ -972,6 +972,7 @@ decl_module! {
 			// 获取群员资产
 			let user_amount = room.total_balances - room.group_manager_balances;
 
+			/// 如果退完群里还有人
 			if number != 1 {
 
 				let amount = user_amount / room.now_members_number.saturated_into::<BalanceOf<T>>() / 4.saturated_into::<BalanceOf<T>>();
@@ -1005,6 +1006,8 @@ decl_module! {
 
 			}
 
+
+			// 如果退完没有人 则解散
 			else {
 
 				let amount = user_amount;
@@ -1017,9 +1020,11 @@ decl_module! {
 
 				<ListenersOfRoom<T>>::remove(group_id);
 
-			}
+				// 删除群红包
+				Self::remove_redpacket_by_room_id(group_id, true);
 
-			// todo 处理房间红包
+				}
+
 
 			Self::deposit_event(RawEvent::Exit(user, group_id));
 
