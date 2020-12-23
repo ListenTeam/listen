@@ -984,13 +984,16 @@ decl_module! {
 
 				let mut listeners = <ListenersOfRoom<T>>::get(group_id);
 
-				if room.group_manager == user {
+				let listeners_cp = listeners.clone();
 
-					if let Some(new_manager) = listeners.clone().pop_first() {
+				// 如果退出的是群主 则换群主
+				if room.clone().group_manager == user {
 
-						room.group_manager = new_manager.clone();
+					if let Some(manager) = listeners_cp.clone().iter().last() {
 
-						listeners.insert(&new_manager);
+						let new_manager = listeners.take(&manager).unwrap();
+
+						room.group_manager = new_manager;
 
 
 					}
