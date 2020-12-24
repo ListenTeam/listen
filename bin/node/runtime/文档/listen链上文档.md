@@ -167,12 +167,12 @@
 		- 顺便处理群里所有过期红包
 ***
 14. 设置语音价格
-    * 代码: `fn set_audio_cost(origin, cost: AudioCost<BalanceOf<T>>)`
+    * 代码: `fn set_audio_price(origin, cost: AudioPrice<BalanceOf<T>>)`
     * 参数: cost(一个结构体，包含每种语音每条收费多少)
     * 逻辑： root权限
 ***
 15. 设置道具价格
-    * 代码: `fn set_props_cost(origin, cost: PropsCost<BalanceOf<T>>)`
+    * 代码: `fn set_props_price(origin, cost: PropsPrice<BalanceOf<T>>)`
     * 参数: cost(一个结构体， 包含每种道具的价格)
     * 逻辑： root权限
 ***
@@ -202,11 +202,11 @@
         * `<ServerId<T>>::put(account_id.clone())`
 20. 自动退群
 	* 代码： `fn exit(origin, group_id: u64)`
-	* 参数: 
+	* 参数:
 		* group_id: 房间id
 	* 逻辑
 		* 群存在并且自己在群里
-		
+
 		* 如果退完群里还有人
 			* 分得（群总资产 - 群主那份） / 总人数 / 4 资产
 			* 如果自己是群主， 那么就选出排名第二的作为群主
@@ -339,7 +339,7 @@ pub struct GroupInfo<AccountId, Balance, AllProps, Audio, BlockNumber, GroupMaxM
 
 	now_members_number: u32, // 目前群人数
 
-	last_kick_hight: BlockNumber,  // 群主上次踢人的高度
+	last_remove_height: BlockNumber,  // 群主上次踢人的高度
 	last_disband_end_hight: BlockNumber,  // 上次解散群提议结束时的高度
 
 	disband_vote: DisbandVote, // 投票信息
@@ -387,9 +387,9 @@ pub struct DisbandTime<BlockNumber>{
 ```
 ***
 ```buildoutcfg
-/// 道具的费用
+/// 道具的价格
 #[derive(PartialEq, Encode, Decode, Default, RuntimeDebug, Clone)]
-pub struct PropsCost<BalanceOf>{
+pub struct PropsPrice<BalanceOf>{
 	picture: BalanceOf,  // 图片价格
 	text: BalanceOf,  // 文字价格
 	video: BalanceOf,  // 视频价格
@@ -397,9 +397,9 @@ pub struct PropsCost<BalanceOf>{
 ```
 ***
 ```buildoutcfg
-/// 语音的费用
+/// 语音的价格
 #[derive(PartialEq, Encode, Decode, Default, RuntimeDebug, Clone)]
-pub struct AudioCost<BalanceOf>{
+pub struct AudioPrice<BalanceOf>{
 	ten_seconds: BalanceOf,  // 10秒价格
 	thirty_seconds: BalanceOf,  // 30秒价格
 	minutes: BalanceOf,  // 60秒价格
