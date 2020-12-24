@@ -20,7 +20,7 @@ use vote::*;
 // use hex_literal::hex;
 use listen_time::*;
 
-use crate::raw::{RemoveTime, DisbandTime, listen_time, PropsCost, AudioCost, AllProps, RoomRewardInfo,
+use crate::raw::{RemoveTime, DisbandTime, listen_time, PropsPrice, AudioPrice, AllProps, RoomRewardInfo,
 Audio, DisbandVote, RedPacket, GroupMaxMembers, VoteType, RewardStatus, InvitePaymentType, GroupInfo,
 PersonInfo, vote, ListenerType, SessionIndex, RoomId, CreateCost};
 
@@ -34,7 +34,7 @@ pub trait Trait: system::Trait + treasury::Trait + timestamp::Trait + pallet_mul
 	type Event: From<Event<Self>> + Into<<Self as system::Trait>::Event>;
 
 	// 空投奖励
-	type AirDropReward: Get<BalanceOf<Self>>;
+	type AirDropAmount: Get<BalanceOf<Self>>;
 
 	// listen基金会权限
 // 	type ListenFounders: EnsureOrigin<Self::Origin, Success=Self::AccountId>;
@@ -43,7 +43,7 @@ pub trait Trait: system::Trait + treasury::Trait + timestamp::Trait + pallet_mul
 	type Create: OnUnbalanced<PositiveImbalanceOf<Self>>;
 	type ProposalRejection: OnUnbalanced<NegativeImbalanceOf<Self>>;
 
-	type VoteExistsHowLong: Get<Self::BlockNumber>;
+	type VoteExpire: Get<Self::BlockNumber>;
 
 	// 红包最小金额
 	type RedPacketMinAmount: Get<BalanceOf<Self>>;
@@ -112,14 +112,14 @@ decl_storage! {
 		};
 
 		/// 道具的费用
-		pub PropsPayment get(fn props_payment): PropsCost<BalanceOf<T>> = PropsCost{
+		pub PropsPayment get(fn props_payment): PropsPrice<BalanceOf<T>> = PropsPrice{
 			picture: <BalanceOf<T> as TryFrom::<Balance>>::try_from(Percent::from_percent(3) * DOLLARS).ok().unwrap(),
 			text: <BalanceOf<T> as TryFrom::<Balance>>::try_from(Percent::from_percent(1) * DOLLARS).ok().unwrap(),
 			video: <BalanceOf<T> as TryFrom::<Balance>>::try_from(Percent::from_percent(3) * DOLLARS).ok().unwrap(),
 		};
 
 		/// 语音的费用
-		pub AudioPayment get(fn audio_payment): AudioCost<BalanceOf<T>> = AudioCost{
+		pub AudioPayment get(fn audio_payment): AudioPrice<BalanceOf<T>> = AudioPrice{
 			ten_seconds: <BalanceOf<T> as TryFrom::<Balance>>::try_from(Percent::from_percent(1) * DOLLARS).ok().unwrap(),
 			thirty_seconds: <BalanceOf<T> as TryFrom::<Balance>>::try_from(Percent::from_percent(2) * DOLLARS).ok().unwrap(),
 			minutes: <BalanceOf<T> as TryFrom::<Balance>>::try_from(Percent::from_percent(2) * DOLLARS).ok().unwrap(),
@@ -223,9 +223,9 @@ decl_module! {
 		// Initializing events
 
 		/// 空投一次投多少token
-		const AirDropReward: BalanceOf<T> = T::AirDropReward::get();
+		const AirDropAmount: BalanceOf<T> = T::AirDropAmount::get();
 		/// 解散群提案可以存在多长时间
-		const VoteExistsHowLong: T::BlockNumber = T::VoteExistsHowLong::get();
+		const VoteExpire: T::BlockNumber = T::VoteExpire::get();
 		/// 每个人原则上领取的最小红包金额
 		const RedPacketMinAmount: BalanceOf<T> = T::RedPacketMinAmount::get();
 		/// 红包存在多长时间
@@ -289,7 +289,7 @@ decl_module! {
 
 			// 国库向空投的目标账号转账 0.99
 			let from = <treasury::Module<T>>::account_id();
-			T::Currency::transfer(&from, &des, T::AirDropReward::get(), KeepAlive)?;
+			T::Currency::transfer(&from, &des, T::AirDropAmount::get(), KeepAlive)?;
 
 			// 添加空投记录
 			<AlreadyAirDropList<T>>::mutate(|h| h.insert(des.clone()));
@@ -693,19 +693,19 @@ decl_module! {
 
 		/// 设置语音单价
 		#[weight = 10_000]
-		fn set_audio_cost(origin, cost: AudioCost<BalanceOf<T>>){
+		fn set_audio_price(origin, cost: AudioPrice<BalanceOf<T>>){
 			ensure_root(origin)?;
 			<AudioPayment<T>>::put(cost);
-			Self::deposit_event(RawEvent::SetAudioCost);
+			Self::deposit_event(RawEvent::SetAudioPrice);
 		}
 
 
 		/// 设置道具单价
 		#[weight = 10_000]
-		fn set_props_cost(origin, cost: PropsCost<BalanceOf<T>>){
+		fn set_props_price(origin, cost: PropsPrice<BalanceOf<T>>){
 			ensure_root(origin)?;
 			<PropsPayment<T>>::put(cost);
-			Self::deposit_event(RawEvent::SetPropsCost);
+			Self::deposit_event(RawEvent::SetPropsPrice);
 		}
 
 
@@ -1278,7 +1278,7 @@ impl <T: Trait> Module <T> {
 			}
 
 			else{
-				if start_time + T::VoteExistsHowLong::get() >= Self::now(){
+				if start_time + T::VoteExpire::get() >= Self::now(){
 					(NotEnd, NotPass)
 				}
 
@@ -1414,8 +1414,8 @@ decl_event!(
 	 SendRedPocket(u64, u128, Amount),
 	 GetRedPocket(u64, u128, Amount),
 	 JoinCostChanged(u64, Amount),
-	 SetPropsCost,
-	 SetAudioCost,
+	 SetPropsPrice,
+	 SetAudioPrice,
 	 SetDisbandInterval,
 	 SetKickInterval,
 	 SetCreateCost,

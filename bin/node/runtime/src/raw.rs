@@ -54,7 +54,7 @@ pub struct RemoveTime<BlockNumber>{
 
 /// 道具的费用
 #[derive(PartialEq, Encode, Decode, Default, RuntimeDebug, Clone)]
-pub struct PropsCost<BalanceOf>{
+pub struct PropsPrice<BalanceOf>{
 	pub picture: BalanceOf,
 	pub text: BalanceOf,
 	pub video: BalanceOf,
@@ -63,7 +63,7 @@ pub struct PropsCost<BalanceOf>{
 
 /// 语音的费用
 #[derive(PartialEq, Encode, Decode, Default, RuntimeDebug, Clone)]
-pub struct AudioCost<BalanceOf>{
+pub struct AudioPrice<BalanceOf>{
 	pub ten_seconds: BalanceOf,
 	pub thirty_seconds: BalanceOf,
 	pub minutes: BalanceOf,

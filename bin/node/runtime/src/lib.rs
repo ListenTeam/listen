@@ -160,19 +160,19 @@ parameter_types! {
 
 parameter_types! {
 	// 空投奖励 0.99个token
-	pub const AirDropReward: Balance = 1 * DOLLARS * 99 / 100;
+	pub const AirDropAmount: Balance = 1 * DOLLARS * 99 / 100;
 	pub const RedPacketMinAmount: Balance = 1 * DOLLARS;
-	pub const VoteExistsHowLong: BlockNumber = 3 * DAYS;
+	pub const VoteExpire: BlockNumber = 3 * DAYS;
 	pub const RedPackExpire: BlockNumber = 1 * DAYS;
 }
 
 impl listen::Trait for Runtime{
 	type Event = Event;
-	type AirDropReward = AirDropReward;
+	type AirDropAmount = AirDropAmount;
 // 	type ListenFounders = pallet_collective::EnsureMember<AccountId, ListenFoundation>;
 	type Create = ();
 	type ProposalRejection = ();
-	type VoteExistsHowLong = VoteExistsHowLong;
+	type VoteExpire = VoteExpire;
 	type RedPacketMinAmount = RedPacketMinAmount;
 	type RedPackExpire = RedPackExpire;
 }
