@@ -84,7 +84,7 @@
     "_enum": [
       "Ten",
       "Hundred",
-      "TiveHundred",
+      "FiveHundred",
       "TenThousand",
       "NoLimit"
     ]
