@@ -530,24 +530,24 @@ decl_module! {
 			Self::deposit_event(RawEvent::BalanceSet(who, free, reserved));
 		}
 
-		/// Exactly as `transfer`, except the origin must be root and the source account may be
-		/// specified.
-		/// # <weight>
-		/// - Same as transfer, but additional read and write because the source account is
-		///   not assumed to be in the overlay.
-		/// # </weight>
-		#[weight = T::WeightInfo::force_transfer()]
-		pub fn force_transfer(
-			origin,
-			source: <T::Lookup as StaticLookup>::Source,
-			dest: <T::Lookup as StaticLookup>::Source,
-			#[compact] value: T::Balance
-		) {
-			ensure_root(origin)?;
-			let source = T::Lookup::lookup(source)?;
-			let dest = T::Lookup::lookup(dest)?;
-			<Self as Currency<_>>::transfer(&source, &dest, value, ExistenceRequirement::AllowDeath)?;
-		}
+		// /// Exactly as `transfer`, except the origin must be root and the source account may be
+		// /// specified.
+		// /// # <weight>
+		// /// - Same as transfer, but additional read and write because the source account is
+		// ///   not assumed to be in the overlay.
+		// /// # </weight>
+		// #[weight = T::WeightInfo::force_transfer()]
+		// pub fn force_transfer(
+		// 	origin,
+		// 	source: <T::Lookup as StaticLookup>::Source,
+		// 	dest: <T::Lookup as StaticLookup>::Source,
+		// 	#[compact] value: T::Balance
+		// ) {
+		// 	ensure_root(origin)?;
+		// 	let source = T::Lookup::lookup(source)?;
+		// 	let dest = T::Lookup::lookup(dest)?;
+		// 	<Self as Currency<_>>::transfer(&source, &dest, value, ExistenceRequirement::AllowDeath)?;
+		// }
 
 	}
 }
@@ -1003,7 +1003,7 @@ impl<T: Trait<I>, I: Instance> Currency<T::AccountId> for Module<T, I> where
 
 				let ed = T::ExistentialDeposit::get();
 
-// 				ensure!(to_account.total() >= ed, Error::<T, I>::ExistentialDeposit);
+				// ensure!(to_account.total() >= ed, Error::<T, I>::ExistentialDeposit);
 
 				Self::ensure_can_withdraw(
 					transactor,
