@@ -899,6 +899,7 @@ impl pallet_society::Trait for Runtime {
 
 parameter_types! {
 	pub const MinVestedTransfer: Balance = 100 * DOLLARS;
+	pub const UnlockDuration: BlockNumber = 30 * DAYS;
 }
 
 impl pallet_vesting::Trait for Runtime {
@@ -907,6 +908,7 @@ impl pallet_vesting::Trait for Runtime {
 	type BlockNumberToBalance = ConvertInto;
 	type MinVestedTransfer = MinVestedTransfer;
 	type WeightInfo = weights::pallet_vesting::WeightInfo;
+	type UnlockDuration = UnlockDuration;
 }
 
 construct_runtime!(

@@ -90,6 +90,8 @@ pub trait Trait: frame_system::Trait {
 
 	/// Weight information for extrinsics in this pallet.
 	type WeightInfo: WeightInfo;
+
+	type UnlockDuration: Get<Self::BlockNumber>;
 }
 
 const VESTING_ID: LockIdentifier = *b"vesting ";
@@ -112,13 +114,23 @@ impl<
 	/// Amount locked at block `n`.
 	pub fn locked_at<
 		BlockNumberToBalance: Convert<BlockNumber, Balance>
-	>(&self, n: BlockNumber) -> Balance {
+	>(&self, n: BlockNumber, duration: BlockNumber) -> Balance {
 		// Number of blocks that count toward vesting
 		// Saturating to 0 when n < starting_block
+
 		let vested_block_count = n.saturating_sub(self.starting_block);
-		let vested_block_count = BlockNumberToBalance::convert(vested_block_count);
+
+		// 超过一定周期 才能够执行减仓操作
+		let num = vested_block_count / duration;
+
+		let real_unlock_block = num * duration;
+
+		// let next_lock_block = n.saturating_sub(real_unlock_block);
+
+		let vested_block_count = BlockNumberToBalance::convert(real_unlock_block);
 		// Return amount that is still locked in vesting
 		let maybe_balance = vested_block_count.checked_mul(&self.per_block);
+
 		if let Some(balance) = maybe_balance {
 			self.locked.saturating_sub(balance)
 		} else {
@@ -323,7 +335,8 @@ impl<T: Trait> Module<T> {
 	fn update_lock(who: T::AccountId) -> DispatchResult {
 		let vesting = Self::vesting(&who).ok_or(Error::<T>::NotVesting)?;
 		let now = <frame_system::Module<T>>::block_number();
-		let locked_now = vesting.locked_at::<T::BlockNumberToBalance>(now);
+
+		let locked_now = vesting.locked_at::<T::BlockNumberToBalance>(now, T::UnlockDuration::get());
 
 		if locked_now.is_zero() {
 			T::Currency::remove_lock(VESTING_ID, &who);
@@ -348,7 +361,7 @@ impl<T: Trait> VestingSchedule<T::AccountId> for Module<T> where
 	fn vesting_balance(who: &T::AccountId) -> Option<BalanceOf<T>> {
 		if let Some(v) = Self::vesting(who) {
 			let now = <frame_system::Module<T>>::block_number();
-			let locked_now = v.locked_at::<T::BlockNumberToBalance>(now);
+			let locked_now = v.locked_at::<T::BlockNumberToBalance>(now, T::UnlockDuration::get());
 			Some(T::Currency::free_balance(who).min(locked_now))
 		} else {
 			None
