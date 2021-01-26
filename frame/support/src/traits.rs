@@ -1173,6 +1173,7 @@ pub trait VestingSchedule<AccountId> {
 		who: &AccountId,
 		locked: <Self::Currency as Currency<AccountId>>::Balance,
 		per_block: <Self::Currency as Currency<AccountId>>::Balance,
+		unlock_duration: Self::Moment,
 		starting_block: Self::Moment,
 	) -> DispatchResult;
 

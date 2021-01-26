@@ -163,6 +163,14 @@
     "FiveHundred": "BlockNumber",
     "TenThousand": "BlockNumber",
     "NoLimit": "BlockNumber"
-  }
+  },
+
+  "VestingInfo": {
+    "locked": "Balance",
+    "per_duration": "Balance",
+    "unlock_duration": "BlockNumber",
+    "starting_block": "BlockNumber"
+    }
+
 }
 ```

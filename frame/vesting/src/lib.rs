@@ -91,7 +91,7 @@ pub trait Trait: frame_system::Trait {
 	/// Weight information for extrinsics in this pallet.
 	type WeightInfo: WeightInfo;
 
-	type UnlockDuration: Get<Self::BlockNumber>;
+	// type UnlockDuration: Get<Self::BlockNumber>;
 }
 
 const VESTING_ID: LockIdentifier = *b"vesting ";
@@ -102,7 +102,9 @@ pub struct VestingInfo<Balance, BlockNumber> {
 	/// Locked amount at genesis.
 	pub locked: Balance,
 	/// Amount that gets unlocked every block after `starting_block`.
-	pub per_block: Balance,
+	pub per_duration: Balance,
+	/// unlock duration
+	pub unlock_duration: BlockNumber,
 	/// Starting block for unlocking(vesting).
 	pub starting_block: BlockNumber,
 }
@@ -123,13 +125,9 @@ impl<
 		// 超过一定周期 才能够执行减仓操作
 		let num = vested_block_count / duration;
 
-		let real_unlock_block = num * duration;
-
-		// let next_lock_block = n.saturating_sub(real_unlock_block);
-
-		let vested_block_count = BlockNumberToBalance::convert(real_unlock_block);
+		let vested_block_count = BlockNumberToBalance::convert(num);
 		// Return amount that is still locked in vesting
-		let maybe_balance = vested_block_count.checked_mul(&self.per_block);
+		let maybe_balance = vested_block_count.checked_mul(&self.per_duration);
 
 		if let Some(balance) = maybe_balance {
 			self.locked.saturating_sub(balance)
@@ -165,7 +163,8 @@ decl_storage! {
 
 				Vesting::<T>::insert(who, VestingInfo {
 					locked: locked,
-					per_block: per_block,
+					per_duration: per_block,
+					unlock_duration: T::BlockNumber::from(1u32),
 					starting_block: begin
 				});
 				let reasons = WithdrawReason::Transfer | WithdrawReason::Reserve;
@@ -195,6 +194,8 @@ decl_error! {
 		ExistingVestingSchedule,
 		/// Amount being transferred is too low to create a vesting schedule.
 		AmountLow,
+		/// unlock duration should not be Zero
+		UnlockDurationZero,
 	}
 }
 
@@ -277,12 +278,14 @@ decl_module! {
 			let transactor = ensure_signed(origin)?;
 			ensure!(schedule.locked >= T::MinVestedTransfer::get(), Error::<T>::AmountLow);
 
+			ensure!(schedule.unlock_duration != T::BlockNumber::from(0), Error::<T>::UnlockDurationZero);
+
 			let who = T::Lookup::lookup(target)?;
 			ensure!(!Vesting::<T>::contains_key(&who), Error::<T>::ExistingVestingSchedule);
 
 			T::Currency::transfer(&transactor, &who, schedule.locked, ExistenceRequirement::AllowDeath)?;
 
-			Self::add_vesting_schedule(&who, schedule.locked, schedule.per_block, schedule.starting_block)
+			Self::add_vesting_schedule(&who, schedule.locked, schedule.per_duration, schedule.unlock_duration, schedule.starting_block)
 				.expect("user does not have an existing vesting schedule; q.e.d.");
 
 			Ok(())
@@ -315,13 +318,15 @@ decl_module! {
 			ensure_root(origin)?;
 			ensure!(schedule.locked >= T::MinVestedTransfer::get(), Error::<T>::AmountLow);
 
+			ensure!(schedule.unlock_duration != T::BlockNumber::from(0), Error::<T>::UnlockDurationZero);
+
 			let target = T::Lookup::lookup(target)?;
 			let source = T::Lookup::lookup(source)?;
 			ensure!(!Vesting::<T>::contains_key(&target), Error::<T>::ExistingVestingSchedule);
 
 			T::Currency::transfer(&source, &target, schedule.locked, ExistenceRequirement::AllowDeath)?;
 
-			Self::add_vesting_schedule(&target, schedule.locked, schedule.per_block, schedule.starting_block)
+			Self::add_vesting_schedule(&target, schedule.locked, schedule.per_duration, schedule.unlock_duration, schedule.starting_block)
 				.expect("user does not have an existing vesting schedule; q.e.d.");
 
 			Ok(())
@@ -336,7 +341,7 @@ impl<T: Trait> Module<T> {
 		let vesting = Self::vesting(&who).ok_or(Error::<T>::NotVesting)?;
 		let now = <frame_system::Module<T>>::block_number();
 
-		let locked_now = vesting.locked_at::<T::BlockNumberToBalance>(now, T::UnlockDuration::get());
+		let locked_now = vesting.locked_at::<T::BlockNumberToBalance>(now, vesting.unlock_duration);
 
 		if locked_now.is_zero() {
 			T::Currency::remove_lock(VESTING_ID, &who);
@@ -361,7 +366,7 @@ impl<T: Trait> VestingSchedule<T::AccountId> for Module<T> where
 	fn vesting_balance(who: &T::AccountId) -> Option<BalanceOf<T>> {
 		if let Some(v) = Self::vesting(who) {
 			let now = <frame_system::Module<T>>::block_number();
-			let locked_now = v.locked_at::<T::BlockNumberToBalance>(now, T::UnlockDuration::get());
+			let locked_now = v.locked_at::<T::BlockNumberToBalance>(now, v.unlock_duration);
 			Some(T::Currency::free_balance(who).min(locked_now))
 		} else {
 			None
@@ -381,7 +386,8 @@ impl<T: Trait> VestingSchedule<T::AccountId> for Module<T> where
 	fn add_vesting_schedule(
 		who: &T::AccountId,
 		locked: BalanceOf<T>,
-		per_block: BalanceOf<T>,
+		per_duration: BalanceOf<T>,
+		unlock_duration: T::BlockNumber,
 		starting_block: T::BlockNumber
 	) -> DispatchResult {
 		if locked.is_zero() { return Ok(()) }
@@ -390,7 +396,8 @@ impl<T: Trait> VestingSchedule<T::AccountId> for Module<T> where
 		}
 		let vesting_schedule = VestingInfo {
 			locked,
-			per_block,
+			per_duration,
+			unlock_duration,
 			starting_block
 		};
 		Vesting::<T>::insert(who, vesting_schedule);
