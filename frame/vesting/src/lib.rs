@@ -123,7 +123,7 @@ impl<
 		let vested_block_count = n.saturating_sub(self.starting_block);
 
 		// 超过一定周期 才能够执行减仓操作
-		let num = vested_block_count / duration;
+		let num = vested_block_count.checked_div(&duration).unwrap_or(vested_block_count);
 
 		let vested_block_count = BlockNumberToBalance::convert(num);
 		// Return amount that is still locked in vesting
