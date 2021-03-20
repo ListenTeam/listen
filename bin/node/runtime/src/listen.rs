@@ -7,7 +7,7 @@ use frame_support::{debug, ensure, decl_module, decl_storage, decl_error, decl_e
 use frame_system as system;
 use pallet_multisig;
 use system::{ensure_signed, ensure_root};
-use sp_runtime::{DispatchResult, Percent, RuntimeDebug, traits::CheckedMul, DispatchError};
+use sp_runtime::{DispatchResult, Percent, RuntimeDebug, traits::{CheckedMul, Zero}, DispatchError};
 use pallet_timestamp as timestamp;
 use node_primitives::{Balance, AccountId};
 use crate::constants::{currency::*, time::*};
@@ -273,29 +273,36 @@ decl_module! {
 
 		/// 空投
 		#[weight = 10_000]
-		fn air_drop(origin, des: T::AccountId) -> DispatchResult {
-
-			// 执行空投的账号
+		fn air_drop(origin, des: Vec<T::AccountId>) -> DispatchResult {
+			/// 执行空投的账号
 			let who = ensure_signed(origin)?;
 
 			/// 获取多签账号id
 			let (_, _, multisig_id) = <Multisig<T>>::get().ok_or(Error::<T>::MultisigIdIsNone)?;
-
-			// 是多签账号才给执行
+			/// 是多签账号才给执行
 			ensure!(who.clone() == multisig_id.clone(), Error::<T>::NotMultisigId);
 
-			// 已经空投过的不能再操作
-			ensure!(!<AlreadyAirDropList<T>>::get().contains(&des), Error::<T>::AlreadyAirDrop);
+			for user in des.iter() {
 
-			// 国库向空投的目标账号转账 0.99
-			let from = <treasury::Module<T>>::account_id();
-			T::Currency::transfer(&from, &des, T::AirDropAmount::get(), KeepAlive)?;
 
-			// 添加空投记录
-			<AlreadyAirDropList<T>>::mutate(|h| h.insert(des.clone()));
+				if <AlreadyAirDropList<T>>::get().contains(&user) {
+					continue;
+				}
 
-			<system::Module<T>>::inc_ref(&des);
-			Self::deposit_event(RawEvent::AirDroped(who, des));
+				/// 账户里面的余额必须是0
+				if T::Currency::total_balance(&user) != Zero::zero() {
+					continue;
+				}
+
+				T::Create::on_unbalanced(T::Currency::deposit_creating(&user, T::AirDropAmount::get()));
+
+				// 添加空投记录
+				<AlreadyAirDropList<T>>::mutate(|h| h.insert(user.clone()));
+				<system::Module<T>>::inc_ref(&user);
+
+			}
+			Self::deposit_event(RawEvent::AirDroped(who));
+
 			Ok(())
 
 		}
@@ -384,11 +391,11 @@ decl_module! {
 		fn into_room(origin, group_id: u64, invite: T::AccountId, inviter: Option<T::AccountId>, payment_type: Option<InvitePaymentType>) -> DispatchResult{
 			let who = ensure_signed(origin)?;
 
-			/// 获取多签账号id
-			let (_, _, multisig_id) = <Multisig<T>>::get().ok_or(Error::<T>::MultisigIdIsNone)?;
-
-			/// 是多签账号才给执行
-			ensure!(who.clone() == multisig_id.clone(), Error::<T>::NotMultisigId);
+			// /// 获取多签账号id
+			// let (_, _, multisig_id) = <Multisig<T>>::get().ok_or(Error::<T>::MultisigIdIsNone)?;
+			//
+			// /// 是多签账号才给执行
+			// ensure!(who.clone() == multisig_id.clone(), Error::<T>::NotMultisigId);
 
 			if inviter.is_some() {
 				// 被邀请人与邀请人不能相同
@@ -1036,7 +1043,7 @@ decl_module! {
 
 		/// 在群里收红包(需要基金会权限 比如基金会指定某个人可以领取多少)
 		#[weight = 10_000]
-		pub fn get_redpacket_in_room(origin, lucky_man: T::AccountId, group_id: u64, redpacket_id: u128, amount: BalanceOf<T>) {
+		pub fn get_redpacket_in_room(origin, amount_vec: Vec<(T::AccountId, BalanceOf<T>)>, group_id: u64, redpacket_id: u128) {
 
 			let server_id = ensure_signed(origin)?;
 
@@ -1044,64 +1051,80 @@ decl_module! {
 
 			ensure!(server_id.clone() == real_server_id, Error::<T>::NotServerId);
 
-			let who = lucky_man;
-
-			// 自己要在群里
-			ensure!(Self::is_in_room(group_id, who.clone())?, Error::<T>::NotInRoom);
-
-			// 红包存在
+			/// 红包存在
 			ensure!(<RedPacketOfRoom<T>>::contains_key(group_id, redpacket_id), Error::<T>::RedPacketNotExists);
 
-			// 领取的金额足够大
-//			ensure!(amount >= T::RedPacketMinAmount::get(), Error::<T>::AmountTooLow);
-
+			/// 获取红包信息
 			let mut redpacket = <RedPacketOfRoom<T>>::get(group_id, redpacket_id);
-
-			ensure!(amount >= redpacket.min_amount_of_per_man.clone(), Error::<T>::AmountTooLow);
-			// 红包有足够余额
-			ensure!(redpacket.total.clone() - redpacket.already_get_amount.clone() >= amount, Error::<T>::AmountNotEnough);
-			// 红包领取人数不能超过最大
-			ensure!(redpacket.lucky_man_number.clone() > (redpacket.already_get_man.clone().len() as u32), Error::<T>::ToMaxNumber);
-
-			// 一个人只能领取一次
-			ensure!(!redpacket.already_get_man.clone().contains(&who), Error::<T>::CountErr);
 
 			// 过期删除数据 把剩余金额给本人
 			if redpacket.end_time.clone() < Self::now(){
-				let remain = redpacket.total.clone() - redpacket.already_get_amount.clone();
-				T::Create::on_unbalanced(T::Currency::deposit_creating(&who, remain));
-				<RedPacketOfRoom<T>>::remove(group_id, redpacket_id);
+
+				Self::remove_redpacket(group_id, redpacket.clone());
 
 				return Err(Error::<T>::Expire)?;
 			}
 
-			T::Create::on_unbalanced(T::Currency::deposit_creating(&who, amount.clone()));
+			let mut total_amount = <BalanceOf<T>>::from(0u32);
 
-			redpacket.already_get_man.insert(who.clone());
-			redpacket.already_get_amount += amount.clone();
+			for (who, amount) in amount_vec.iter() {
 
-			// 如果领取红包的人数已经达到上线 那么就把剩余的金额给本人 并删除记录
-			if redpacket.already_get_man.clone().len() == (redpacket.lucky_man_number.clone() as usize){
-				let remain = redpacket.total.clone() - redpacket.already_get_amount.clone();
-				T::Create::on_unbalanced(T::Currency::deposit_creating(&who, remain));
-				<RedPacketOfRoom<T>>::remove(group_id, redpacket_id);
+				/// 自己要在群里
+				if Self::is_in_room(group_id, who.clone())? == false{
+					continue;
+				}
 
-			}
+				// 领取的金额足够大
+	//			ensure!(amount >= T::RedPacketMinAmount::get(), Error::<T>::AmountTooLow);
 
-			if redpacket.already_get_amount.clone() == redpacket.total{
-				<RedPacketOfRoom<T>>::remove(group_id, redpacket_id);
-			}
+				/// 领取的金额大于最小要求
+				if *amount < redpacket.min_amount_of_per_man.clone() {
+					continue;
+				}
 
-			else{
-				<RedPacketOfRoom<T>>::insert(group_id, redpacket_id, redpacket);
+				// 红包有足够余额
+				if redpacket.total.clone() - redpacket.already_get_amount.clone() < *amount {
+					continue;
+				}
+
+				// 红包领取人数不能超过最大
+				if redpacket.lucky_man_number.clone() <= redpacket.already_get_man.clone().len() as u32 {
+					break;
+				}
+
+				// 一个人只能领取一次
+				if redpacket.already_get_man.clone().contains(&who) == true {
+					continue;
+				}
+
+				T::Create::on_unbalanced(T::Currency::deposit_creating(&who, amount.clone()));
+
+				redpacket.already_get_man.insert(who.clone());
+				redpacket.already_get_amount += amount.clone();
+
+				// 如果领取红包的人数已经达到上线 那么就把剩余的金额给本人 并删除记录
+				if redpacket.already_get_man.clone().len() == (redpacket.lucky_man_number.clone() as usize){
+					Self::remove_redpacket(group_id, redpacket.clone());
+				}
+				else {
+					<RedPacketOfRoom<T>>::insert(group_id, redpacket_id, redpacket.clone());
+				}
+
+				if redpacket.already_get_amount.clone() == redpacket.total{
+					<RedPacketOfRoom<T>>::remove(group_id, redpacket_id);
+				}
+
+				total_amount += *amount;
+
 			}
 
 			// 顺便处理过期红包
 			Self::remove_redpacket_by_room_id(group_id, false);
 
-			Self::deposit_event(RawEvent::GetRedPocket(group_id, redpacket_id, amount.clone()));
+			Self::deposit_event(RawEvent::GetRedPocket(group_id, redpacket_id, total_amount));
 
 		}
+
 
 	}
 }
@@ -1311,6 +1334,27 @@ impl <T: Trait> Module <T> {
 		}
 	}
 
+	/// 删除红包
+	fn remove_redpacket(room_id: u64, redpacket: RedPacket<T::AccountId, BTreeSet<T::AccountId>, BalanceOf<T>, T::BlockNumber>) {
+		let who = redpacket.boss.clone();
+		// let currency_id = redpacket.currency_id.clone();
+		let remain = redpacket.total.clone() - redpacket.already_get_amount.clone();
+		let redpacket_id = redpacket.id.clone();
+
+		let remain_u128 = remain.saturated_into::<u128>();
+
+		// if currency_id == T::GetNativeCurrencyId::get() {
+		T::Create::on_unbalanced(T::Currency::deposit_creating(&who, remain));
+		// }
+		// else {
+		// 	let amount = remain_u128.saturated_into::<MultiBalanceOf<T>>();
+		// 	T::MultiCurrency::deposit(currency_id, &who, amount);
+		// }
+
+		<RedPacketOfRoom<T>>::remove(room_id, redpacket_id);
+
+	}
+
 
 	/// 排序队列里的account_id
 	fn sort_account_id(who: Vec<T::AccountId>) -> result::Result<Vec<T::AccountId>, DispatchError> {
@@ -1399,7 +1443,7 @@ decl_event!(
 // 	 CallHash = [u8; 32],
 	 {
 	 SetMultisig,
-	 AirDroped(AccountId, AccountId),
+	 AirDroped(AccountId),
 	 CreatedRoom(AccountId, u64),
 	 Invited(AccountId, AccountId),
 	 IntoRoom(AccountId, Option<AccountId>, u64),
