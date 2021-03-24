@@ -391,11 +391,11 @@ decl_module! {
 		fn into_room(origin, group_id: u64, invite: T::AccountId, inviter: Option<T::AccountId>, payment_type: Option<InvitePaymentType>) -> DispatchResult{
 			let who = ensure_signed(origin)?;
 
-			// /// 获取多签账号id
-			// let (_, _, multisig_id) = <Multisig<T>>::get().ok_or(Error::<T>::MultisigIdIsNone)?;
-			//
-			// /// 是多签账号才给执行
-			// ensure!(who.clone() == multisig_id.clone(), Error::<T>::NotMultisigId);
+			/// 获取多签账号id
+			let (_, _, multisig_id) = <Multisig<T>>::get().ok_or(Error::<T>::MultisigIdIsNone)?;
+
+			/// 是多签账号才给执行
+			ensure!(who.clone() == multisig_id.clone(), Error::<T>::NotMultisigId);
 
 			if inviter.is_some() {
 				// 被邀请人与邀请人不能相同
@@ -1035,7 +1035,6 @@ decl_module! {
 
 				}
 
-
 			Self::deposit_event(RawEvent::Exit(user, group_id));
 
 		}
@@ -1045,11 +1044,11 @@ decl_module! {
 		#[weight = 10_000]
 		pub fn get_redpacket_in_room(origin, amount_vec: Vec<(T::AccountId, BalanceOf<T>)>, group_id: u64, redpacket_id: u128) {
 
-			let server_id = ensure_signed(origin)?;
+			let mul = ensure_signed(origin)?;
+			let (_, _, multisig_id) = <Multisig<T>>::get().ok_or(Error::<T>::MultisigIdIsNone)?;
 
-			let real_server_id = <ServerId<T>>::get().ok_or(Error::<T>::ServerIdNotExists)?;
-
-			ensure!(server_id.clone() == real_server_id, Error::<T>::NotServerId);
+			/// 是多签账号才给执行
+			ensure!(mul.clone() == multisig_id.clone(), Error::<T>::NotMultisigId);
 
 			/// 红包存在
 			ensure!(<RedPacketOfRoom<T>>::contains_key(group_id, redpacket_id), Error::<T>::RedPacketNotExists);
