@@ -1208,18 +1208,18 @@ impl<Block, Client, Inner> BlockImport<Block> for BabeBlockImport<Block, Client,
 				)
 			},
 			(true, false, _) => {
-				return Err(
-					ConsensusError::ClientImport(
-						babe_err(Error::<Block>::ExpectedEpochChange(hash, slot_number)).into(),
-					)
-				)
+				// return Err(
+				// 	ConsensusError::ClientImport(
+				// 		babe_err(Error::<Block>::ExpectedEpochChange(hash, slot_number)).into(),
+				// 	)
+				// )
 			},
 			(false, true, _) => {
-				return Err(
-					ConsensusError::ClientImport(
-						babe_err(Error::<Block>::UnexpectedEpochChange).into(),
-					)
-				)
+				// return Err(
+				// 	ConsensusError::ClientImport(
+				// 		babe_err(Error::<Block>::UnexpectedEpochChange).into(),
+				// 	)
+				// )
 			},
 		}
 
